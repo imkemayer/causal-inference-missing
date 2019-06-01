@@ -1,0 +1,6 @@
+.Rhistory
+.RData
+.Ruserdata
+.Rprofile
+*.sh
+*.RData
