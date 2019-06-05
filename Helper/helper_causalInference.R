@@ -202,8 +202,7 @@ ipw <- function(X, outcome, treat,
   
   # Computed normalized version of IPW
   ipw2 <- 1/sum(fitted$weight[which(treat==1)]) * sum(outcome[which(treat==1)] * fitted$weight[which(treat==1)]) - 1/sum(fitted$weight[which(!(treat==1))]) * sum(outcome[which(!(treat==1))] * fitted$weight[which(!(treat==1))])
-  print(ipw1)
-  print(ipw2)
+  
   return(cbind(ipw1 = ipw1,
                ipw2 = ipw2))
 }
