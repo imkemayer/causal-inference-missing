@@ -225,7 +225,8 @@ ipw_estimation_miss <- function(N, n, p, r, sd = 0.1,
                                 cit = FALSE, cio = FALSE,
                                 use.interaction = FALSE,
                                 use.mask = FALSE,
-                                lib_path = NULL){
+                                lib_path = NULL,
+                                local = TRUE){
   results <- data.frame("ipw1_true" = rep(NA, N), "ipw2_true" = rep(NA,N))
   
   if (trimming_weight == 1) {
@@ -262,14 +263,18 @@ ipw_estimation_miss <- function(N, n, p, r, sd = 0.1,
   tau <- mean(sample$tau)
 
   t <- Sys.time()
-  #cl <- makeCluster(nb.cores)
-  #registerDoParallel(cl)
-  
+
   if (!is.null(lib_path)){
-    .libPaths('~/R/lib.test')
+    .libPaths(lib_path)
     #clusterEvalQ(cl, .libPaths(lib_path))
-    cl <- makePSOCKcluster(nb.cores, outfile='')
   }
+
+  if (local){
+    cl <- makeCluster(nb.cores)
+  } else {
+    cl <- parallel::makePSOCKcluster(nb.cores, outfile='')
+  }
+  
   registerDoParallel(cl)
   
   results <- foreach(i=1:N, 
@@ -317,7 +322,7 @@ ipw_estimation_miss <- function(N, n, p, r, sd = 0.1,
       X.mask <- X.mask[,which(missing.cov)]
     } 
     
-    tmp <- prepare_data_ate(sample$X.incomp, sample$w, sample$y, 
+    tmp <- prepare_data_ate(sample$X.incomp, sample$treat, sample$y, 
                             imputation.method, mi.m, X.mask,
                             use.outcome, use.interaction)
     X.imp <- tmp$df.imp
@@ -360,7 +365,7 @@ ipw_estimation_miss <- function(N, n, p, r, sd = 0.1,
                    n = rep(n, N), 
                    p = rep(p, N), 
                    r = rep(r, N), 
-                   tau = rep(r, N),
+                   tau = rep(tau, N),
                    setting = rep(setting, N),
                    link = rep(link, N),
                    trimming = rep(trimming, N),
@@ -408,7 +413,8 @@ dr_estimation_miss <- function(N, n, p, r, sd = 0.1,
                                cit = FALSE, cio = FALSE,
                                use.interaction = FALSE,
                                use.mask = FALSE,
-                               lib_path = NULL){
+                               lib_path = NULL,
+                               local = TRUE){
   results <- data.frame("dr_true_true" = rep(NA, N), "se" = rep(NA,N))
   
   if (trimming_weight == 1) {
@@ -448,14 +454,17 @@ dr_estimation_miss <- function(N, n, p, r, sd = 0.1,
   t <- Sys.time()
   
   
-  #cl <- makeCluster(nb.cores)
-  #registerDoParallel(cl)
-  
   if (!is.null(lib_path)){
-    .libPaths('~/R/lib.test')
+    .libPaths(lib_path)
     #clusterEvalQ(cl, .libPaths(lib_path))
-    cl <- makePSOCKcluster(nb.cores, outfile='')
   }
+
+  if (local){
+    cl <- makeCluster(nb.cores)
+  } else {
+    cl <- parallel::makePSOCKcluster(nb.cores, outfile='')
+  }
+
   registerDoParallel(cl)
   
   results <- foreach(i=1:N, 
@@ -480,7 +489,7 @@ dr_estimation_miss <- function(N, n, p, r, sd = 0.1,
                                    "missMDA", "missForest",
                                    "mice", "misaem", "softImpute", "norm", "assertthat", "pracma"),
                      .combine = rbind) %dopar% {
-                   
+                  
     sample <- generate_sim(n=n, p = p, r = r, ng = ng, sd = sd,
                            setting = setting,
                            mechanism=mechanism, prop.missing = prob,
@@ -524,8 +533,7 @@ dr_estimation_miss <- function(N, n, p, r, sd = 0.1,
     } else {
       res <- c()
       for (k in 1:mi.m){
-        res <- rbind(res,
-                     c(dr(X = X.imp[[k]],
+        res <- rbind(res,dr(X = X.imp[[k]],
                         outcome = sample$y, 
                         treat = sample$treat, 
                         ps.method=ps.method, 
@@ -533,13 +541,11 @@ dr_estimation_miss <- function(N, n, p, r, sd = 0.1,
                         seed = i,
                         fitted = fitted,
                         trimming_weight = trimming_weight,
-                        use.outcome = use.outcome,
                         out.method = out.method,
                         mask = X.mask,
-                        use.interaction = use.interaction)))
+                        use.interaction = use.interaction))
       }
-      results[i, 1] <- mean(res[,1])
-      results[i, 1] <- mean(res[,2])
+      results[i,] <- t(apply(data.frame(res), FUN = mean, MARGIN = 2))
     }
   }
   stopCluster(cl)
@@ -596,7 +602,8 @@ ate_estimation_miss <- function(N, n, p, r,
                                 mechanism = "MCAR",
                                 cit = FALSE, cio = FALSE,
                                 use.interaction = FALSE,
-                                lib_path = NULL){
+                                lib_path = NULL,
+                                local = TRUE){
   results_dr_miss <- c()
   results_ipw_miss <- c()
   for (imp in imputation.methods){
@@ -622,7 +629,8 @@ ate_estimation_miss <- function(N, n, p, r,
                                                     mechanism = mechanism,
                                                     cit = cit, cio = cio, 
                                                     use.interaction = use.interaction,
-                                                    lib_path = lib_path)))
+                                                    lib_path = lib_path,
+                                                    local = local)))
         
         try(results_ipw_miss <- rbind(results_ipw_miss,
                                   ipw_estimation_miss(N, n, p, r, 
@@ -637,7 +645,8 @@ ate_estimation_miss <- function(N, n, p, r,
                                                       mechanism = mechanism, 
                                                       cit = cit, cio = cio, 
                                                       use.interaction = use.interaction,
-                                                      lib_path = lib_path)))
+                                                      lib_path = lib_path,
+                                                      local = local)))
       }
     }
     
@@ -655,7 +664,8 @@ ate_estimation_miss <- function(N, n, p, r,
                                                   mechanism = mechanism,
                                                   cit = cit, cio = cio, 
                                                   use.interaction = use.interaction,
-                                                  lib_path = lib_path)))
+                                                  lib_path = lib_path,
+                                                  local = local)))
       
       try(results_ipw_miss <- rbind(results_ipw_miss,
                                 ipw_estimation_miss(N, n, p, r, 
@@ -670,7 +680,8 @@ ate_estimation_miss <- function(N, n, p, r,
                                                     mechanism = mechanism, 
                                                     cit = cit, cio = cio, 
                                                     use.interaction = use.interaction,
-                                                    lib_path = lib_path)))
+                                                    lib_path = lib_path,
+                                                    local = local)))
     }
   }
   
