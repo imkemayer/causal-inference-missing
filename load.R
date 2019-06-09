@@ -31,6 +31,10 @@ if (!require(doParallel)) {
 	install.packages('doParallel')
 	library(doParallel)
 }
+# if (!require(doSNOW)) {
+#   install.packages('doSNOW')
+#   library(doSNOW)
+# }
 if (!require(foreach)) {
 	install.packages('foreach')
 	library(foreach)
