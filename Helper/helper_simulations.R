@@ -198,6 +198,13 @@ prepare_data_ate <- function(df, w, y, imputation.method, mi.m,
   } 
   if (tolower(imputation.method) == "saem"){
     df.imp <- data.frame(df)
+    if (max(as.integer(w))!= 1){
+      w <- as.integer(w)
+      idx.ones <- which(w==max(w))
+      idx.zeros <- which(w!=max(w))
+      w[idx.ones] <- 1
+      w[idx.zeros] <- 0
+    }
     Z.misaem <- predict_misaem(data.frame(df), 
                                w, 
                                pattern = mask,
@@ -512,7 +519,7 @@ dr_estimation_miss <- function(N, n, p, r, sd = 0.1,
     } 
     
     
-    tmp <- prepare_data_ate(sample$X.incomp, sample$w, sample$y, 
+    tmp <- prepare_data_ate(sample$X.incomp, sample$treat, sample$y, 
                             imputation.method, mi.m, X.mask,
                             use.outcome, use.interaction)
     X.imp <- tmp$df.imp
@@ -556,7 +563,7 @@ dr_estimation_miss <- function(N, n, p, r, sd = 0.1,
                    n = rep(n, N),
                    p = rep(p, N),
                    r = rep(r, N),
-                   tau = rep(r, N),
+                   tau = rep(tau, N),
                    setting = rep(setting, N),
                    link = rep(link, N),
                    trimming = rep(trimming, N),
