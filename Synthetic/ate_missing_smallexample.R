@@ -5,13 +5,13 @@
 
 script.dir <- dirname(sys.frame(1)$ofile)
 setwd(script.dir)
-source("../Helper/helper_simulations.R")
+source("../load.R")
 
 # Proportion of missing values
 prop.missing <- 0.5
 
 # Choose methods to compare
-imp.methods <- c("mice", "mean", "mia.grf", "mean.grf", "mia.grf.ate", "mean.grf.ate", "saem", "udell")
+imp.methods <- c("mean")#c("mice", "mean", "mia.grf", "mean.grf", "mia.grf.ate", "mean.grf.ate", "saem", "udell")
 
 # Number of imputations for multiple imputations
 mi.m <- 10
@@ -26,7 +26,7 @@ r <- 3
 nn <- c(100, 500)
 
 # Number of experiments per setting
-N <- 2
+N <- 100
 
 
 results_compare_dr_miss <- data.frame()
@@ -42,7 +42,7 @@ for (cit in c(FALSE, TRUE)){
         results$results_ipw_miss <- c()
         try(results <- ate_estimation_miss(N=N, n=n, p = p, r = r,
                                            prob = prop.missing, setting = "latentclass", 
-                                           missing = "MCAR", 
+                                           mechanism = "MCAR", 
                                            use.mask = use.mask,
                                            imputation.methods = imp.methods, 
                                            cit = cit, cio = cio,
