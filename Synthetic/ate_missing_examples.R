@@ -57,7 +57,8 @@ for (cit in c(FALSE, TRUE)){
                                                imputation.methods = imp.methods, 
                                                cit = cit, cio = cio,
                                                mi.m = mi.m,
-                                               lib_path = "~/R/R_libs"))
+                                               lib_path = "~/R/R_libs",
+                                               local = TRUE))
             results_compare_dr_miss <- rbind(results_compare_dr_miss, 
                                              results$results_dr_miss)
             results_compare_ipw_miss <- rbind(results_compare_ipw_miss, 
