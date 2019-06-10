@@ -212,7 +212,7 @@ prepare_data_ate <- function(df, w, y, imputation.method, mi.m,
     fitted <- Z.misaem$fitted
   } 
   if (tolower(imputation.method) == "udell") {
-    pca_soft <- recover_pca_gaussian_cv(df, 1:dim(df)[2], nfolds = 3)
+    pca_soft <- recover_pca_gaussian_cv(as.matrix(df), 1:dim(df)[2], nfolds = 3)
     df.imp <- data.frame(pca_soft$Uhat)
   }
   return(list(df.imp = df.imp, fitted = fitted))
@@ -319,6 +319,7 @@ ipw_estimation_miss <- function(N, n, p, r, sd = 0.1,
     
     fitted <- NULL
     X.mask <- NULL
+    X.imp <- NULL
     
     
   
@@ -329,14 +330,14 @@ ipw_estimation_miss <- function(N, n, p, r, sd = 0.1,
       X.mask <- X.mask[,which(missing.cov)]
     } 
     
-    tmp <- prepare_data_ate(sample$X.incomp, sample$treat, sample$y, 
+    try(tmp <- prepare_data_ate(sample$X.incomp, sample$treat, sample$y, 
                             imputation.method, mi.m, X.mask,
-                            use.outcome, use.interaction)
-    X.imp <- tmp$df.imp
-    fitted <- tmp$fitted
+                            use.outcome, use.interaction))
+    try(X.imp <- tmp$df.imp)
+    try(fitted <- tmp$fitted)
     
     if (mi.m == 1){
-      results[i,] <- ipw(X = X.imp,
+      try(results[i,] <- ipw(X = X.imp,
                          outcome = sample$y, 
                          treat = sample$treat, 
                          ps.method = ps.method, 
@@ -345,11 +346,11 @@ ipw_estimation_miss <- function(N, n, p, r, sd = 0.1,
                          trimming_weight = trimming_weight,
                          fitted = fitted,
                          mask = X.mask,
-                         use.interaction = use.interaction)
+                         use.interaction = use.interaction))
     } else {
       res <- c()
       for (k in 1:mi.m){
-        res <- rbind(res, ipw(X = X.imp[[k]],
+        try(res <- rbind(res, ipw(X = X.imp[[k]],
                      outcome = sample$y, 
                      treat = sample$treat, 
                      ps.method = ps.method, 
@@ -358,7 +359,7 @@ ipw_estimation_miss <- function(N, n, p, r, sd = 0.1,
                      trimming_weight = trimming_weight,
                      fitted = fitted,
                      mask = X.mask,
-                     use.interaction = use.interaction))
+                     use.interaction = use.interaction)))
         
       }
       results[i,] <- t(apply(data.frame(res), FUN = mean, MARGIN = 2))
@@ -519,14 +520,14 @@ dr_estimation_miss <- function(N, n, p, r, sd = 0.1,
     } 
     
     
-    tmp <- prepare_data_ate(sample$X.incomp, sample$treat, sample$y, 
+    try(tmp <- prepare_data_ate(sample$X.incomp, sample$treat, sample$y, 
                             imputation.method, mi.m, X.mask,
-                            use.outcome, use.interaction)
-    X.imp <- tmp$df.imp
-    fitted <- tmp$fitted
+                            use.outcome, use.interaction))
+    try(X.imp <- tmp$df.imp)
+    try(fitted <- tmp$fitted)
     
     if (mi.m == 1){
-      results[i, ] <- dr(X = X.imp,
+      try(results[i, ] <- dr(X = X.imp,
                          outcome = sample$y, 
                          treat = sample$treat, 
                          ps.method=ps.method, 
@@ -536,11 +537,11 @@ dr_estimation_miss <- function(N, n, p, r, sd = 0.1,
                          trimming_weight = trimming_weight,
                          out.method = out.method,
                          mask = X.mask,
-                         use.interaction = use.interaction)
+                         use.interaction = use.interaction))
     } else {
       res <- c()
       for (k in 1:mi.m){
-        res <- rbind(res,dr(X = X.imp[[k]],
+        try(res <- rbind(res,dr(X = X.imp[[k]],
                         outcome = sample$y, 
                         treat = sample$treat, 
                         ps.method=ps.method, 
@@ -550,7 +551,7 @@ dr_estimation_miss <- function(N, n, p, r, sd = 0.1,
                         trimming_weight = trimming_weight,
                         out.method = out.method,
                         mask = X.mask,
-                        use.interaction = use.interaction))
+                        use.interaction = use.interaction)))
       }
       results[i,] <- t(apply(data.frame(res), FUN = mean, MARGIN = 2))
     }
