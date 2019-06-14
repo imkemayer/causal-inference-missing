@@ -25,6 +25,9 @@ try(source("./helper_udell.R"))
 try(source("./helper_simulations.R"))
 try(source("../Utils/miss.saem.v2.R"))
 try(source("./Utils/miss.saem.v2.R"))
+try(source("../Utils/amputation.R"))
+try(source("./Utils/amputation.R"))
+
 setwd(previous.wd)
 
 if (!require(doParallel)) {
@@ -94,3 +97,5 @@ if (!require(spcov)) install.packages('spcov')
 if (!require(parallel)) install.packages('parallel')
 if (!require(mice)) install.packages('mice')
 if (!require(dplyr)) install.packages('dplyr')
+if (!require(dbarts)) install.packages('dbarts')
+
