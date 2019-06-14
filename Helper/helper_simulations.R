@@ -198,6 +198,7 @@ prepare_data_ate <- function(df, w, y, imputation.method, mi.m,
   } 
   if (tolower(imputation.method) == "saem"){
     df.imp <- data.frame(df)
+    df.num <- data.frame(sapply(data.frame(df), as.numeric))
     if (max(as.integer(w))!= 1){
       w <- as.integer(w)
       idx.ones <- which(w==max(w))
@@ -205,15 +206,25 @@ prepare_data_ate <- function(df, w, y, imputation.method, mi.m,
       w[idx.ones] <- 1
       w[idx.zeros] <- 0
     }
-    Z.misaem <- predict_misaem(data.frame(df), 
+    Z.misaem <- predict_misaem(df.num, 
                                w, 
                                pattern = mask,
                                use.interaction = use.interaction)
     fitted <- Z.misaem$fitted
   } 
   if (tolower(imputation.method) == "udell") {
-    pca_soft <- recover_pca_gaussian_cv(as.matrix(df), 1:dim(df)[2], nfolds = 3)
-    df.imp <- data.frame(pca_soft$Uhat)
+    #pca_soft <- recover_pca_gaussian_cv(as.matrix(df), 1:dim(df)[2], nfolds = 3)
+    #df.imp <- data.frame(pca_soft$Uhat)
+    if (all(sapply(data.frame(df), is.numeric))){
+      pca_soft <- recover_pca_gaussian_cv(as.matrix(df), 1:dim(df)[2], nfolds = 3)
+      df.imp <- data.frame(pca_soft$Uhat)
+    } else {
+      #var.type <- sapply(data.frame(df), FUN = function(x) {if_else(is.numeric(x), "gaussian", "binomial")})
+      #df[,var.type=="binomial"] <- sapply(df[,var.type=="binomial"], as.integer)
+      #glrm_mod <- mimi::mimi(y=data.frame(df), model = "low-rank",
+      #                          var.type = var.type, max.rank = dim(df), algo="bcgd", lambda1=1)
+      #ncomp <- missMDA::estim_ncpFAMD(df, ncp.max = dim(df)[2]-1)
+    }
   }
   return(list(df.imp = df.imp, fitted = fitted))
 }

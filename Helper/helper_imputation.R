@@ -184,7 +184,7 @@ get_imputeInf <- function(df, max_inf_proxy = 1e300, min_inf_proxy = -1e300) {
 
 get_imputeEM <- function(X){
   s <- prelim.norm(X)
-  thetahat <- em.norm(s, showits= FALSE,criterion = sqrt(.Machine$double.eps))
+  thetahat <- em.norm(s, showits= FALSE, criterion = sqrt(.Machine$double.eps))
   params <- getparam.norm(s, thetahat)
   X.prep <- t(t(X) - params$mu)
   Inv.Sigma.tmp <- solve(params$sigma)

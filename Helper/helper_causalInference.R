@@ -35,8 +35,12 @@ predict_misaem <- function(X, treat, seed=0, pattern = NULL, use.interaction = F
   k <- 0 
   while (test.boundary & k < 10){
     list.saem <- miss.saem.v2(as.matrix(X), treat, seed = seed+k, tol_em=1e-06, print_iter=FALSE)
-  
-    pr.saem <- pred_saem(as.matrix(X), list.saem$beta, list.saem$mu, list.saem$sig2, method="map")
+    
+    pr.saem <- NULL
+    try(pr.saem <- pred_saem(as.matrix(X), list.saem$beta, list.saem$mu, list.saem$sig2, method="map"))
+    if (is.null(pr.saem)){
+      pr.saem <- pred_saem(as.matrix(X), list.saem$beta, list.saem$mu, list.saem$sig2, method="impute")
+    }
     test.boundary <- (min(pr.saem)<1e-6 | max(pr.saem)>1-1e-6)
     k <- k+1
   }
@@ -168,7 +172,7 @@ ipw <- function(X, outcome, treat,
       fitted <- predict_random_forests(X, as.factor(treat), seed)
     } else if (ps.method == "gbm") {
       fitted <- predict_gbm(X, as.factor(treat), seed)
-    } else if (ps.method == "grf") {
+    } else if (ps.method %in% c("grf","grf.ate")) {
       fitted <- predict_grf(X, as.factor(treat), seed)
     } 
   }
@@ -301,36 +305,40 @@ dr <- function(X,
       fitted <- predict_random_forests(X1, as.factor(treat), seed)
     } else if (ps.method == "gbm") {
       fitted <- predict_gbm(X1, as.factor(treat), seed)
-    } else if (ps.method %in% c("grf.ate","grf")) {
+    } else if (ps.method %in% c("grf")) {
       fitted <- predict_grf(X1, as.factor(treat), seed)
     }
   }
 
   # Compute weights depending on the estimand
-  if (target == "all"){
-    fitted$weight <- (treat)/fitted$pscore + (1 - treat)/ (1 - fitted$pscore)
-  } else if (target == "treated") {
-    fitted$weight <- treat + (1-treat)*fitted$pscore / (1 - fitted$pscore)
-  } else if (target == "control") {
-    fitted$weight <- treat* (1 - fitted$pscore) / fitted$pscore + (1-treat)
-  } else if (target == "overlap") {
-    fitted$weight <- treat * (1 - fitted$pscore) + (1-treat)*fitted$pscore
-  } else if (target == "matching") {
-    fitted$weight <- treat * apply(cbind(fitted$pscore, 1-fitted$pscore), 1, min) / fitted$pscore + (1-fitted$treated)* apply(cbind(fitted$pscore, 1-fitted$pscore), 1, min) / (1-fitted$pscore)
+  if (!is.null(fitted)){
+    if (target == "all"){
+      fitted$weight <- (treat)/fitted$pscore + (1 - treat)/ (1 - fitted$pscore)
+    } else if (target == "treated") {
+      fitted$weight <- treat + (1-treat)*fitted$pscore / (1 - fitted$pscore)
+    } else if (target == "control") {
+      fitted$weight <- treat* (1 - fitted$pscore) / fitted$pscore + (1-treat)
+    } else if (target == "overlap") {
+      fitted$weight <- treat * (1 - fitted$pscore) + (1-treat)*fitted$pscore
+    } else if (target == "matching") {
+      fitted$weight <- treat * apply(cbind(fitted$pscore, 1-fitted$pscore), 1, min) / fitted$pscore + (1-fitted$treated)* apply(cbind(fitted$pscore, 1-fitted$pscore), 1, min) / (1-fitted$pscore)
+    }
+    
+    # Trim the weights (default: no trimming)
+    weightMax <- quantile(fitted$weight, c(trimming_weight), na.rm=TRUE) 
+    fitted[is.na(fitted$weight) ,"weight"] <- weightMax # If the weight is NA this means that pscore was 0
+    fitted[fitted$weight > weightMax,"weight"] <- weightMax
+    weightMin <- quantile(fitted$weight, c(1-trimming_weight)) 
+    fitted[fitted$weight < weightMin,"weight"] <- weightMin
   }
-  
-  # Trim the weights (default: no trimming)
-  weightMax <- quantile(fitted$weight, c(trimming_weight), na.rm=TRUE) 
-  fitted[is.na(fitted$weight) ,"weight"] <- weightMax # If the weight is NA this means that pscore was 0
-  fitted[fitted$weight > weightMax,"weight"] <- weightMax
-  weightMin <- quantile(fitted$weight, c(1-trimming_weight)) 
-  fitted[fitted$weight < weightMin,"weight"] <- weightMin
-  
-  
+
   ###############
   # Outcome model
   ###############
-  W.hat <- fitted$weight
+  if (!is.null(fitted)){
+    W.hat <- fitted$weight
+  }
+
   X <- X.orig
   mask <- mask.orig
   
@@ -435,15 +443,15 @@ dr <- function(X,
     # EM for linear regression Y ~ X with missing values to predict potential outcomes 
     else {
       # Parameter estimation of potential outcome model under treatment
-      yX <- as.matrix(cbind(outcome[which(treat==1)], X[which(treat==1),]))
+      yX <- as.matrix(cbind(outcome[which(treat==max(as.numeric(treat)))], X[which(treat==max(as.numeric(treat))),]))
       
       if (is.null(mask)){
         X2 <- yX
       } else {
-        X2 <- as.matrix(X[which(treat==1),])
+        X2 <- as.matrix(X[which(treat==max(as.numeric(treat))),])
         colname <- colnames(data.frame(X2))
         length.mask <- dim(mask)[2]
-        X2 <- cbind(X2, as.matrix(mask[which(treat==1),]))
+        X2 <- cbind(X2, as.matrix(mask[which(treat==max(as.numeric(treat))),]))
         if (length.mask>0){
           colnames(X2) <- c(colname, paste0("R",1:length.mask))
         }
@@ -457,17 +465,17 @@ dr <- function(X,
           na.action.default <- getOption("na.action")
           options(na.action = "na.pass")
           X2 <- data.frame(model.matrix(fmla, data = data.frame(X2)))
-          X2 <- cbind(outcome[which(treat==1)], X2)
+          X2 <- cbind(outcome[which(treat==max(as.numeric(treat)))], X2)
           options(na.action = na.action.default)
         } else {
           colname <- colnames(X2)
-          X2 <- cbind(outcome[which(treat==1)], X2)
+          X2 <- cbind(outcome[which(treat==max(as.numeric(treat)))], X2)
           colnames(X2) <- c("y", colname)
         }
       }
       dim2.X <- dim(X2)[2]
       mod.t <- prelim.norm(X2)
-      thetahat <- em.norm(mod.t)
+      thetahat <- em.norm(mod.t, showits = F)
       pars <- getparam.norm(mod.t, thetahat)
       sig.inv <- solve(pars$sigma[2:dim2.X,2:dim2.X])
       beta_treated <- c(pars$mu[1] - 
@@ -476,15 +484,15 @@ dr <- function(X,
       
       
       # Parameter estimation of potential outcome model under control
-      yX <- as.matrix(cbind(outcome[which(treat==0)], X[which(treat==0),]))
+      yX <- as.matrix(cbind(outcome[which(treat==min(as.numeric(treat)))], X[which(treat==min(as.numeric(treat))),]))
       
       if (is.null(mask)){
         X2 <- yX
       } else {
-        X2 <- as.matrix(X[which(treat==0),])
+        X2 <- as.matrix(X[which(treat==min(as.numeric(treat))),])
         colname <- colnames(data.frame(X2))
         length.mask <- dim(mask)[2]
-        X2 <- cbind(X2, as.matrix(mask[which(treat==0),]))
+        X2 <- cbind(X2, as.matrix(mask[which(treat==min(as.numeric(treat))),]))
         if (length.mask>0){
           colnames(X2) <- c(colname, paste0("R",1:length.mask))
         }
@@ -498,17 +506,17 @@ dr <- function(X,
           na.action.default <- getOption("na.action")
           options(na.action = "na.pass")
           X2 <- data.frame(model.matrix(fmla, data = data.frame(X2)))
-          X2 <- cbind(outcome[which(treat==0)], X2)
+          X2 <- cbind(outcome[which(treat==min(as.numeric(treat)))], X2)
           options(na.action = na.action.default)
         } else {
           colname <- colnames(X2)
-          X2 <- cbind(outcome[which(treat==0)], X2)
+          X2 <- cbind(outcome[which(treat==min(as.numeric(treat)))], X2)
           colnames(X2) <- c("y", colname)
         }
       }
       dim2.X <- dim(X2)[2]
       mod.t <- prelim.norm(X2)
-      thetahat <- em.norm(mod.t)
+      thetahat <- em.norm(mod.t, showits = F)
       pars <- getparam.norm(mod.t, thetahat)
       sig.inv <- solve(pars$sigma[2:dim2.X,2:dim2.X])
       beta_control <- c(pars$mu[1] - 
@@ -540,7 +548,29 @@ dr <- function(X,
           options(na.action = na.action.default)
         }
       }
-      
+
+      # dim2.X <- dim(X)[2]
+      # X.imp.ml <- get_imputeEM(as.matrix(cbind(X[which(treat==max(as.numeric(treat))),])))$Ximp
+      # X.imp.ml <- X.imp.ml[,1:dim2.X]
+      #
+      # # X.imp.ml <- imputeEM(as.matrix(cbind(X)))$Ximp
+      # # X.imp.ml <- X.imp.ml[which(sample$treat==1),1:dim2.X]
+      #
+      # beta_treated <- lm(y[which(treat==max(as.numeric(treat)))] ~ as.matrix(X.imp.ml))$coefficient
+      #
+      # #X.imp.ml <- imputeEM(as.matrix(cbind(X[which(sample$treat==0),],y[which(sample$treat==0)])))$Ximp
+      # X.imp.ml <- get_imputeEM(as.matrix(cbind(X[which(treat==min(as.numeric(treat))),])))$Ximp
+      # X.imp.ml <- X.imp.ml[,1:dim2.X]
+      # 
+      # # X.imp.ml <- imputeEM(as.matrix(cbind(X)))$Ximp
+      # # X.imp.ml <- X.imp.ml[which(sample$treat==0),1:dim2.X]
+      # 
+      # beta_control <- lm(y[which(treat==min(as.numeric(treat)))] ~ as.matrix(X.imp.ml))$coefficient
+      #
+      # X2 <- get_imputeEM(as.matrix(cbind(X)))$Ximp
+      # X2 <- X2[ ,1:dim2.X]
+
+
       y_1.hat <- as.matrix(X2, ncol=dim(X2)[2])%*%beta_treated[2:(dim(X2)[2]+1)] + beta_treated[1]
       y_0.hat <- as.matrix(X2, ncol=dim(X2)[2])%*%beta_control[2:(dim(X2)[2]+1)] + beta_control[1]
     }
