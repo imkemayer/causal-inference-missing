@@ -1,0 +1,9 @@
+This file documents the contents of the directory found in code.zip.
+The following files are present.
+
+functions.R: user-written functions necessary for the other files to run
+sim.code.overlap.R: simulation code for the overlap setting
+sim.code.non.overlap.R: simulation code for the incomplete overlap setting
+example1.code.R: code used for example 1 in section 6 (except for genetic matching)
+example1.code.gm.R: code used for genetic matching in example 1 in section 6
+example2.code.R: code used for example 2 in section 6

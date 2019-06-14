@@ -1,0 +1,12 @@
+This file documents the contents of the directory found in data.zip.
+The following files are present.
+
+Section 4
+sim.data:  Data that can be loaded into R with the load command.  It will then create an object called "imp1".  This dataset can be used with for the simulations in section 4
+imp1.vars.sim.data.doc: description of variables in sim.data
+
+Section 6
+example.data:  Data that can be read into R using the load command.  It will then create an R data frame called "ihdp".  This dataset can be used with the code for the two examples in Section 6.
+ihdp.vars.exmp.data.doc:  description of additional ihdp variables (and name changes for others) in example.data beyond what was in sim.data above
+
+
