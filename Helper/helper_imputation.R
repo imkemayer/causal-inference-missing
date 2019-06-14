@@ -1,4 +1,3 @@
-# Mean/mode imputation
 get_imputeMean <- function(df, args_list = NULL){
   df_imp <- df
   vars_real <- colnames(df)[sapply(df, is.numeric) & !sapply(df, is.integer)]
@@ -6,7 +5,11 @@ get_imputeMean <- function(df, args_list = NULL){
   vars_factor <- colnames(df)[!sapply(df, is.numeric)]
   
   if (length(vars_real) >0){
-    mean_real <- sapply(df[,vars_real], mean, na.rm=T)
+    if (length(vars_real)>1){
+      mean_real <- sapply(df[,vars_real], mean, na.rm=T)
+    } else {
+      mean_real <- c(mean(df[,vars_real], na.rm=T))
+    }
     df_imp[ , vars_real] <- sapply(1:length(vars_real), 
                                    function(x) ifelse(is.na(df_imp[,vars_real[x]]), mean_real[x], df_imp[,vars_real[x]]))
   }

@@ -207,8 +207,17 @@ ipw <- function(X, outcome, treat,
   # Computed normalized version of IPW
   ipw2 <- 1/sum(fitted$weight[which(treat==1)]) * sum(outcome[which(treat==1)] * fitted$weight[which(treat==1)]) - 1/sum(fitted$weight[which(!(treat==1))]) * sum(outcome[which(!(treat==1))] * fitted$weight[which(!(treat==1))])
   
+  if (ps.method == "glm"){
+    mod <- lm(outcome~treat, weights = fitted$weight)
+    se.ipw2 <- sqrt(diag(sandwich::vcovHC(mod, type = "HC")))[2]
+  } else {
+    se.ipw2 <- mean((outcome[which(treat==1)] - 1/sum(fitted$weight[which(treat==1)]) * sum(outcome[which(treat==1)] * fitted$weight[which(treat==1)]))^2 * fitted$weight[which(treat==1)] 
+                      +(outcome[which(treat==0)] - 1/sum(fitted$weight[which(!(treat==1))]) * sum(outcome[which(!(treat==1))] * fitted$weight[which(!(treat==1))]))^2 * fitted$weight[which(treat==0)])
+  
+  }
   return(cbind(ipw1 = ipw1,
-               ipw2 = ipw2))
+               ipw2 = ipw2,
+               se.ipw2 = se.ipw2))
 }
 
 
