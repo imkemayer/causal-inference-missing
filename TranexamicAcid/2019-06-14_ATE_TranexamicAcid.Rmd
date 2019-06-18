@@ -24,6 +24,11 @@ knitr::opts_chunk$set(echo = TRUE, cache= TRUE)
 
 
 # Preliminaries
+## Choose population
+Estimate ATE on the entire population or only on TBI patients?
+```{r }
+population <- "all" # "tbi"
+```
 
 ## Load libraries
 
@@ -49,13 +54,18 @@ suppressPackageStartupMessages(library(naniar)) # Missing values exploration and
 suppressPackageStartupMessages(library(VIM)) # Missing values exploration and visualization
 suppressPackageStartupMessages(library(BaylorEdPsych)) # Little's MCAR test
 
+suppressPackageStartupMessages(library(RColorBrewer)) # Color scale
+myColors <- brewer.pal(6,"Set1")
+names(myColors) <- c("-", "FAMD", "MF", "MIA", "MICE", "MEAN")
+colScale <- scale_colour_manual(name = "Imputation.method",values = myColors)
+
 
 # Set random generator seed for reproducible results
 set.seed(0)
 
 # Define data directory
 data.dir <- "~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/Data/"
-
+fig.dir <- "~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/Figures/"
 helper.dir <- "~/Documents/TraumaMatrix/CausalInference/Simulations/causal-inference-missing/"
 source(paste0(helper.dir, "Helper/helper_imputation.R"))
 source(paste0(helper.dir, "Helper/helper_causalInference.R"))
@@ -125,7 +135,7 @@ First we find the optimal number of dimensions for the FAMD by cross-validation
 ```
 
 ```{r plot_ncomp_all_2outcomes}
-load(paste0(data.dir, Sys.Date(),"_ncomp_all_2outcomes.RData"))
+load(paste0(data.dir, "2019-06-14","_ncomp_all_2outcomes.RData"))
 plot(1:length(ncomp_all_2outcomes$criterion), ncomp_all_2outcomes$criterion, xlab = "nb dim", ylab = "MSEP")
 ```
 
@@ -138,8 +148,10 @@ imputed_all_2outcomes_FAMD <- get_FAMD(data_indAll, seed = 0, ncp=ncp, Method = 
 res.famd <- FAMD(imputed_all_2outcomes_FAMD,
                  ncp = ncp, graph=F)
 
+if (population == "tbi"){
 # After imputation, restrain to the target units (TBI patients)
-imputed_all_2outcomes_FAMD <- imputed_all_2outcomes_FAMD[imputed_all_2outcomes_FAMD$Trauma.cranien %in% c("1") | imputed_all_2outcomes_FAMD$AIS.tete >= 2, ]
+  imputed_all_2outcomes_FAMD <- imputed_all_2outcomes_FAMD[imputed_all_2outcomes_FAMD$Trauma.cranien %in% c("1") | imputed_all_2outcomes_FAMD$AIS.tete >= 2, ]
+}
 ```
 
 
@@ -158,7 +170,7 @@ Again we find the optimal number of dimensions for the FAMD by cross-validation,
 ```
 
 ```{r plot_ncomp_all_1outcome }
-load(paste0(data.dir, Sys.Date(),"_ncomp_all_1outcome.RData"))
+load(paste0(data.dir, "2019-06-14","_ncomp_all_1outcome.RData"))
 plot(1:length(ncomp_all_1outcome$criterion), ncomp_all_1outcome$criterion, xlab = "nb dim", ylab = "MSEP")
 ```
 
@@ -168,8 +180,10 @@ By cross-validation we find ncp=18 to be the optimal number of components.
 ncp = 18
 imputed_all_1outcome_FAMD <- get_FAMD(data_indAll[, !(names(data_indAll) == "Glasgow.sortie")], seed = 0, ncp=ncp, Method = "Regularized", scale = T, threshold = 1e-06)
 
+if (population == "tbi"){
 # After imputation, restrain to the target units (TBI patients)
-imputed_all_1outcome_FAMD <- imputed_all_1outcome_FAMD[imputed_all_1outcome_FAMD$Trauma.cranien %in% c("1") | imputed_all_1outcome_FAMD$AIS.tete >= 2, ]
+  imputed_all_1outcome_FAMD <- imputed_all_1outcome_FAMD[imputed_all_1outcome_FAMD$Trauma.cranien %in% c("1") | imputed_all_1outcome_FAMD$AIS.tete >= 2, ]
+}
 ```
 
 
@@ -198,7 +212,7 @@ First we find the optimal number of dimensions for the FAMD by cross-validation
 ```
 
 ```{r plot_ncomp_all_mf}
-load(paste0(data.dir, Sys.Date(),"_ncomp_all_confounders.RData"))
+load(paste0(data.dir, "2019-06-14","_ncomp_all_confounders.RData"))
 plot(1:10, ncomp_all_confounders$criterion, xlab = "nb dim", ylab = "MSEP")
 ```
 
@@ -216,9 +230,11 @@ res.famd <- FAMD(imputed_covariates,
 
 confounders_all_MF <- res.famd$ind$coord
 
+if (population == "tbi"){
 # After factorization, restrain to the target units (TBI patients)
-row_num <- which(data_indAll$Trauma.cranien %in% c("1") | data_indAll$AIS.tete >= 2)
-confounders_all_MF <- confounders_all_MF[row_num,]
+  row_num <- which(data_indAll$Trauma.cranien %in% c("1") | data_indAll$AIS.tete >= 2)
+  confounders_all_MF <- confounders_all_MF[row_num,]
+}
 ```
 
 ## MICE
@@ -227,16 +243,20 @@ confounders_all_MF <- confounders_all_MF[row_num,]
 imputed_all_2outcomes_mice <- get_MICE(data_indAll, seed = 0, m=1)
 
 
+if (population == "tbi"){
 # After imputation, restrain to the target units (TBI patients)
-imputed_all_2outcomes_mice <- imputed_all_2outcomes_mice[imputed_all_2outcomes_mice$Trauma.cranien %in% c("1") | imputed_all_2outcomes_mice$AIS.tete >= 2, ]
+  imputed_all_2outcomes_mice <- imputed_all_2outcomes_mice[imputed_all_2outcomes_mice$Trauma.cranien %in% c("1") | imputed_all_2outcomes_mice$AIS.tete >= 2, ]
+}
 ```
 
 
 ```{r mice_impute_all_1outcome}
 imputed_all_1outcome_mice <- get_MICE(data_indAll[, !(names(data_indAll) == "Glasgow.sortie")], seed = 0, m=1)
 
+if (population == "tbi"){
 # After imputation, restrain to the target units (TBI patients)
-imputed_all_1outcome_mice <- imputed_all_1outcome_mice[imputed_all_1outcome_mice$Trauma.cranien %in% c("1") | imputed_all_1outcome_mice$AIS.tete >= 2, ]
+  imputed_all_1outcome_mice <- imputed_all_1outcome_mice[imputed_all_1outcome_mice$Trauma.cranien %in% c("1") | imputed_all_1outcome_mice$AIS.tete >= 2, ]
+}
 ```
 
 
@@ -307,9 +327,9 @@ The standardized mean differences (SMD) higher than some threshold th, for insta
 
 ### On imputed data
 ```{r ipw_ate, warning=FALSE}
-results_ipw_ate_list <- list()
-results_ipw_ate <- data.frame(matrix(ncol=7, nrow=0), row.names = NULL)
-colnames(results_ipw_ate) <- c("Estimand",
+results_ipw_imp_list <- list()
+results_ipw_imp <- data.frame(matrix(ncol=7, nrow=0), row.names = NULL)
+colnames(results_ipw_imp) <- c("Estimand",
                                "Imputation.method", 
                                "Imputation.ind", 
                                "Imputation.var", 
@@ -317,10 +337,10 @@ colnames(results_ipw_ate) <- c("Estimand",
                                "ATE.p100", 
                                "STD.p100")
 
-data_list <- list(list("FAMD", "all", "2outcomes", imputed_all_2outcomes_FAMD),
-                  list("FAMD", "all", "1outcome", imputed_all_1outcome_FAMD),
-                  list("mice", "all", "2outcomes", imputed_all_2outcomes_mice),
-                  list("mice", "all", "1outcome", imputed_all_1outcome_mice))
+data_list <- list(list("FAMD", population, "2outcomes", imputed_all_2outcomes_FAMD),
+                  list("FAMD", population, "1outcome", imputed_all_1outcome_FAMD),
+                  list("mice", population, "2outcomes", imputed_all_2outcomes_mice),
+                  list("mice", population, "1outcome", imputed_all_1outcome_mice))
 
 methods_list <- list("glm", "gbm", "grf")
 idx <- 1
@@ -339,24 +359,74 @@ for (i in 1:length(data_list)){
   outcome <- data_list[[i]][[4]]$DC.Trauma
   
   for (j in 1:length(methods_list)){
-    results_ipw_ate_list[[idx]] <- ipw(X=df, outcome = outcome, treat = treatment,
+    results_ipw_imp_list[[idx]] <- ipw(X=df, outcome = outcome, treat = treatment,
                                        ps.method = methods_list[[j]], target = "all", 
                                        seed=0, trimming_weight=.999)
-    results_ipw_ate <- rbind(results_ipw_ate,
+    results_ipw_imp <- rbind(results_ipw_imp,
                              data.frame("Estimand" = "ATE",
                                         "Imputation.method" = data_list[[i]][[1]],
                                         "Imputation.ind" = data_list[[i]][[2]],
                                         "Imputation.var" = data_list[[i]][[3]],
                                         "PS.estimation" = methods_list[[j]],
-                                        "ATE.p100" = results_ipw_ate_list[[idx]][[2]]*100,
-                                        "STD.p100" = results_ipw_ate_list[[idx]][[3]]*100))
+                                        "ATE.p100" = results_ipw_imp_list[[idx]][[2]]*100,
+                                        "STD.p100" = results_ipw_imp_list[[idx]][[3]]*100))
     
     idx <- idx+1
   }
 }
 
 
-knitr::kable(results_ipw_ate, caption = "IPW estimations", digits = 2)
+knitr::kable(results_ipw_imp, caption = "IPW estimations", digits = 2)
+
+```
+
+### On latent factors (from matrix factorization)
+```{r ipw_mf, warning=FALSE}
+results_ipw_mf_list <- list()
+results_ipw_mf <- data.frame(matrix(ncol=7, nrow=0), row.names = NULL)
+colnames(results_ipw_mf) <- c("Estimand",
+                               "Imputation.method", 
+                               "Imputation.ind", 
+                               "Imputation.var", 
+                               "PS.estimation",
+                               "ATE.p100", 
+                               "STD.p100")
+
+data_list <- list(list("MF", population, "-", data.frame(confounders_all_MF)))
+
+if (population == "tbi"){
+  treatment <- data_indTBI$Acide.tranexamique
+  outcome <- data_indTBI$DC.Trauma
+} else {
+  treatment <- data_indAll$Acide.tranexamique
+  outcome <- data_indAll$DC.Trauma
+}
+methods_list <- list("grf")#"gbm", "glm", 
+idx <- 1
+
+for (i in 1:length(data_list)){
+  df <- data_list[[i]][[4]]
+  
+  
+  for (j in 1:length(methods_list)){
+    results_ipw_mf_list[[idx]] <- ipw(X=df, outcome = outcome, treat = treatment,
+                                       ps.method = methods_list[[j]], target = "all", 
+                                       seed=0, trimming_weight=.999)
+    results_ipw_mf <- rbind(results_ipw_mf,
+                             data.frame("Estimand" = "ATE",
+                                        "Imputation.method" = data_list[[i]][[1]],
+                                        "Imputation.ind" = data_list[[i]][[2]],
+                                        "Imputation.var" = data_list[[i]][[3]],
+                                        "PS.estimation" = methods_list[[j]],
+                                        "ATE.p100" = results_ipw_mf_list[[idx]][[2]]*100,
+                                        "STD.p100" = results_ipw_mf_list[[idx]][[3]]*100))
+    
+    idx <- idx+1
+  }
+}
+
+
+knitr::kable(results_ipw_mf, caption = "IPW estimations", digits = 2)
 
 ```
 
@@ -386,9 +456,9 @@ covariates_misaem <- data_indAll %>%
                         dplyr::select(c(confounders, "Trauma.cranien", "Acide.tranexamique", "DC.Trauma", "AIS.tete"))
 
 
-misaem.results.all <- prepare_data_misaem(covariates_misaem, use_targets = FALSE)
+misaem.results.all <- prepare_data_misaem(covariates_misaem, use_targets = (population == "tbi"))
 
-data_list <- list(list("all", misaem.results.all))
+data_list <- list(list(population, misaem.results.all))
 
 
 for (k in 1:length(weights_list)){
@@ -444,8 +514,11 @@ colnames(results_ipw_mia) <- c("Estimand",
                                  "STD.p100")
 
 
-
-data_list <- list(list("mia", "target", "-", get_imputeInf(data_indTBI)))
+if (population == "tbi"){
+  data_list <- list(list("mia", population, "-", get_imputeInf(data_indTBI)))
+} else {
+  data_list <- list(list("mia", population, "-", get_imputeInf(data_indAll)))
+}
 
 methods_list <- list( "grf")
 
@@ -492,4 +565,479 @@ for (k in 1:length(weights_list)){
 knitr::kable(results_ipw_mia, caption = "ipw ATE estimations on mia covariates", digits = 2)
 
 ```
+
+### Mean+grf
+```{r ipw_at_mean, warning=FALSE}
+results_ipw_mean_list <- list()
+results_ipw_mean <- data.frame(matrix(ncol=7, nrow=0), row.names = NULL)
+colnames(results_ipw_mean) <- c("Estimand",
+                                "Imputation.method", 
+                                "Imputation.ind", 
+                                "Imputation.var", 
+                                "PS.estimation", 
+                                "ATE.p100", 
+                                "STD.p100")
+
+
+if (population == "tbi"){
+  data_list <- list(list("mean", population, "-", get_imputeMean(data_indTBI)))
+} else {
+  data_list <- list(list("mean", population, "-", get_imputeMean(data_indAll)))
+}
+
+methods_list <- list( "grf")
+
+weights_list <- list("all")#, "treated", "control", "overlap", "matching")
+weights_trim_list <- list(0.999, 0.999, 0.999, 1, 1)
+estimands_list <- list("ATE", "ATT", "ATC", "ATE_overlap","ATE_match")
+
+    
+idx <- 1
+
+
+for (k in 1:length(weights_list)){
+  for (i in 1:length(data_list)) {
+    treatment <- data_list[[i]][[4]]$Acide.tranexamique
+    outcome <- data_list[[i]][[4]]$DC.Trauma
+
+
+    df <- data_list[[i]][[4]] %>%
+              dplyr::select(-c("Acide.tranexamique", "DC.Trauma")) %>%
+              dplyr::select(confounders)
+    
+    for (j in 1:length(methods_list)){
+        results_ipw_mean_list[[idx]] <- ipw(X=df, ps.method = "grf", 
+                                           treat=treatment, outcome =outcome, 
+                                           target = weights_list[[k]], 
+                                           seed=0, 
+                                           trimming_weight=weights_trim_list[[k]])
+       
+        
+        results_ipw_mean <- rbind(results_ipw_mean,
+                                  data.frame("Estimand" = estimands_list[[k]],
+                                             "Imputation.method" = data_list[[i]][[1]],
+                                             "Imputation.ind" = data_list[[i]][[2]],
+                                             "Imputation.var" = data_list[[i]][[3]],
+                                             "PS.estimation" = methods_list[[j]],
+                                             "ATE.p100" = results_ipw_mean_list[[idx]][[2]]*100,
+                                             "STD.p100" = results_ipw_mean_list[[idx]][[3]]*100))
+        
+        idx <- idx+1
+    }
+  }
+}
+
+knitr::kable(results_ipw_mean, caption = "ipw ATE estimations on mean imputed covariates", digits = 2)
+```
+
 ## DR
+
+
+### On imputed data
+```{r dr_imp, warning=FALSE}
+results_dr_imp_list <- list()
+results_dr_imp <- data.frame(matrix(ncol=7, nrow=0), row.names = NULL)
+colnames(results_dr_imp) <- c("Estimand",
+                               "Imputation.method", 
+                               "Imputation.ind", 
+                               "Imputation.var", 
+                               "PS.estimation",
+                               "ATE.p100", 
+                               "STD.p100")
+
+data_list <- list(list("FAMD", population, "2outcomes", imputed_all_2outcomes_FAMD),
+                  list("FAMD", population, "1outcome", imputed_all_1outcome_FAMD),
+                  list("mice", population, "2outcomes", imputed_all_2outcomes_mice),
+                  list("mice", population, "1outcome", imputed_all_1outcome_mice))
+
+methods_list <- list("glm", "gbm", "grf.ate")
+idx <- 1
+
+for (i in 1:length(data_list)){
+  df <- data_list[[i]][[4]] %>% 
+          dplyr::select(-c("Acide.tranexamique", "DC.Trauma"))
+  
+  if ("Glasgow.sortie" %in% colnames(df)) {
+    df <- df %>%
+          dplyr::select(-"Glasgow.sortie")
+  }
+  
+  df.confounders <- df %>% dplyr::select(confounders)
+  
+  treatment <- data_list[[i]][[4]]$Acide.tranexamique
+  outcome <- data_list[[i]][[4]]$DC.Trauma
+  
+  for (j in 1:length(methods_list)){
+    results_dr_imp_list[[idx]] <- dr(X=df.confounders, outcome = outcome, treat = treatment,
+                                     X.for.outcome = df,
+                                     ps.method = methods_list[[j]], out.method = methods_list[[j]],
+                                     target = "all", 
+                                     seed=0, trimming_weight=.999)
+    results_dr_imp <- rbind(results_dr_imp,
+                             data.frame("Estimand" = "ATE",
+                                        "Imputation.method" = data_list[[i]][[1]],
+                                        "Imputation.ind" = data_list[[i]][[2]],
+                                        "Imputation.var" = data_list[[i]][[3]],
+                                        "PS.estimation" = methods_list[[j]],
+                                        "ATE.p100" = results_dr_imp_list[[idx]][[1]]*100,
+                                        "STD.p100" = results_dr_imp_list[[idx]][[2]]*100))
+    
+    idx <- idx+1
+  }
+}
+
+
+knitr::kable(results_dr_imp, caption = "DR estimations", digits = 2)
+
+```
+
+### On latent factors (from matrix factorization)
+```{r dr_mf, warning=FALSE}
+results_dr_mf_list <- list()
+results_dr_mf <- data.frame(matrix(ncol=7, nrow=0), row.names = NULL)
+colnames(results_dr_mf) <- c("Estimand",
+                             "Imputation.method", 
+                             "Imputation.ind", 
+                             "Imputation.var", 
+                             "PS.estimation",
+                             "ATE.p100", 
+                             "STD.p100")
+
+data_list <- list(list("MF", population, "-", confounders_all_MF, dplyr::select(imputed_all_2outcomes_FAMD,-c(confounders, "Acide.tranexamique", "DC.Trauma", "Glasgow.sortie"))))
+
+if (population == "tbi"){
+  treatment <- data_indTBI$Acide.tranexamique
+  outcome <- data_indTBI$DC.Trauma
+} else {
+  treatment <- data_indAll$Acide.tranexamique
+  outcome <- data_indAll$DC.Trauma
+}
+
+methods_list <- list("grf.ate") # "glm", "gbm",
+idx <- 1
+
+for (i in 1:length(data_list)){
+  df.confounders <- data.frame(data_list[[i]][[4]])
+  df <- cbind(df.confounders, data.frame(data_list[[i]][[5]]))
+  
+  
+  for (j in 1:length(methods_list)){
+    results_dr_mf_list[[idx]] <- dr(X=df.confounders, outcome = outcome, treat = treatment,
+                                    X.for.outcome = df,
+                                    ps.method = methods_list[[j]], out.method = methods_list[[j]],
+                                    target = "all", 
+                                    seed=0, trimming_weight=.999)
+    results_dr_mf <- rbind(results_dr_mf,
+                           data.frame("Estimand" = "ATE",
+                                      "Imputation.method" = data_list[[i]][[1]],
+                                      "Imputation.ind" = data_list[[i]][[2]],
+                                      "Imputation.var" = data_list[[i]][[3]],
+                                      "PS.estimation" = methods_list[[j]],
+                                      "ATE.p100" = results_dr_mf_list[[idx]][[1]]*100,
+                                      "STD.p100" = results_dr_mf_list[[idx]][[2]]*100))
+    
+    idx <- idx+1
+  }
+}
+
+
+knitr::kable(results_dr_mf, caption = "DR estimations", digits = 2)
+
+```
+
+### Likelihood approach
+```{r dr_at_misaem, warning=FALSE}
+results_dr_misaem_list <- list()
+results_dr_misaem <- data.frame(matrix(ncol=7, nrow=0), row.names = NULL)
+colnames(results_dr_misaem) <- c("Estimand",
+                                 "Imputation.method", 
+                                 "Imputation.ind", 
+                                 "Imputation.var", 
+                                 "PS.estimation", 
+                                 "ATE.p100", 
+                                 "STD.p100")
+
+
+weights_list <- list("all") #list("all", "treated", "control", "overlap", "matching")
+weights_trim_list <- list(0.999, 0.999, 0.999, 1, 1)
+estimands_list <- list("ATE", "ATT", "ATC", "ATE_overlap", "ATE_match")
+
+
+idx <- 1
+
+
+
+#covariates_misaem <- data_indAll %>%
+#                        dplyr::select(c("Trauma.cranien", "Acide.tranexamique", "DC.Trauma", "AIS.tete"))
+
+
+misaem.results.all <- prepare_data_misaem(data_indAll, use_targets = (population == "tbi"))
+
+data_list <- list(list(population, misaem.results.all))
+
+
+for (k in 1:length(weights_list)){
+  for (i in 1:length(data_list)) {
+    df <- data_list[[i]][[2]] %>% 
+          dplyr::select(-c("Acide.tranexamique", "DC.Trauma"))
+          
+  
+    if ("Glasgow.sortie" %in% colnames(df)) {
+      df <- df %>%
+            dplyr::select(-"Glasgow.sortie")
+    }
+    
+    df.confounders <- df %>% dplyr::select(confounders)
+  
+    treatment <- data_list[[i]][[2]]$Acide.tranexamique
+    outcome <- data_list[[i]][[2]]$DC.Trauma
+    df.confounders.imp.fitted <- prepare_data_ate(df= df.confounders, w = treatment, y=outcome, 
+                                                  imputation.method = "saem", mask = NULL, use.interaction = F)
+    results_dr_misaem_list[[idx]] <- dr(X = df.confounders.imp.fitted$df.imp, 
+                                        X.for.outcome = df,
+                                        ps.method = "glm",
+                                        out.method = "glm",
+                                        fitted = df.confounders.imp.fitted$fitted, 
+                                        treat = treatment, 
+                                        outcome = outcome,
+                                        target = weights_list[[k]], 
+                                        seed=0, trimming_weight=weights_trim_list[[k]])
+  
+    results_dr_misaem <- rbind(results_dr_misaem,
+                               data.frame("Estimand" = estimands_list[[k]],
+                                          "Imputation.method" = "-",
+                                          "Imputation.ind" = data_list[[i]][[1]],
+                                          "Imputation.var" = "-",
+                                          "PS.estimation" = "saem",
+                                          "ATE.p100" = results_dr_misaem_list[[idx]][[1]]*100,
+                                          "STD.p100" = results_dr_misaem_list[[idx]][[2]]*100))
+    
+    idx <- idx+1
+  }
+}
+
+knitr::kable(results_dr_misaem, caption = "DR ATE estimations using PS scores from incomplete data", digits = 2)
+
+```
+
+
+### MIA+grf
+```{r dr_at_mia, warning=FALSE}
+results_dr_mia_list <- list()
+results_dr_mia <- data.frame(matrix(ncol=7, nrow=0), row.names = NULL)
+colnames(results_dr_mia) <- c("Estimand",
+                              "Imputation.method", 
+                              "Imputation.ind", 
+                              "Imputation.var", 
+                              "PS.estimation", 
+                              "ATE.p100", 
+                              "STD.p100")
+
+
+if (population == "tbi"){
+  data_list <- list(list("mia", population, "-", get_imputeInf(data_indTBI)))
+} else {
+  data_list <- list(list("mia", population, "-", get_imputeInf(data_indAll)))
+}
+
+methods_list <- list( "grf.ate")
+
+weights_list <- list("all")#, "treated", "control", "overlap", "matching")
+weights_trim_list <- list(0.999, 0.999, 0.999, 1, 1)
+estimands_list <- list("ATE", "ATT", "ATC", "ATE_overlap","ATE_match")
+
+    
+idx <- 1
+
+
+for (k in 1:length(weights_list)){
+  for (i in 1:length(data_list)) {
+    treatment <- data_list[[i]][[4]]$Acide.tranexamique
+    outcome <- data_list[[i]][[4]]$DC.Trauma
+
+
+    df <- data_list[[i]][[4]] %>%
+              dplyr::select(-c("Acide.tranexamique", "DC.Trauma")) 
+    
+    df.confounders <- df %>%
+                        dplyr::select(confounders)
+    
+    for (j in 1:length(methods_list)){
+        results_dr_mia_list[[idx]] <- dr(X=df.confounders, 
+                                         X.for.outcome = df,
+                                         ps.method = "grf.ate", out.method = "grf.ate",
+                                         treat=treatment, outcome =outcome, 
+                                         target = weights_list[[k]], 
+                                         seed=0, 
+                                         trimming_weight=weights_trim_list[[k]])
+       
+        
+        results_dr_mia <- rbind(results_dr_mia,
+                                data.frame("Estimand" = estimands_list[[k]],
+                                           "Imputation.method" = data_list[[i]][[1]],
+                                           "Imputation.ind" = data_list[[i]][[2]],
+                                           "Imputation.var" = data_list[[i]][[3]],
+                                           "PS.estimation" = methods_list[[j]],
+                                           "ATE.p100" = results_dr_mia_list[[idx]][[1]]*100,
+                                           "STD.p100" = results_dr_mia_list[[idx]][[2]]*100))
+        
+        idx <- idx+1
+    }
+  }
+}
+
+knitr::kable(results_dr_mia, caption = "DR ATE estimations on mia covariates", digits = 2)
+
+```
+
+### Mean+grf
+```{r dr_at_mean, warning=FALSE}
+results_dr_mean_list <- list()
+results_dr_mean <- data.frame(matrix(ncol=7, nrow=0), row.names = NULL)
+colnames(results_dr_mean) <- c("Estimand",
+                               "Imputation.method", 
+                               "Imputation.ind", 
+                               "Imputation.var", 
+                               "PS.estimation", 
+                               "ATE.p100", 
+                               "STD.p100")
+
+
+if (population == "tbi"){
+  data_list <- list(list("mean", population, "-", get_imputeMean(data_indTBI)))
+} else {
+  data_list <- list(list("mean", population, "-", get_imputeMean(data_indAll)))
+}
+
+methods_list <- list( "grf.ate")
+
+weights_list <- list("all")#, "treated", "control", "overlap", "matching")
+weights_trim_list <- list(0.999, 0.999, 0.999, 1, 1)
+estimands_list <- list("ATE", "ATT", "ATC", "ATE_overlap","ATE_match")
+
+    
+idx <- 1
+
+
+for (k in 1:length(weights_list)){
+  for (i in 1:length(data_list)) {
+    treatment <- data_list[[i]][[4]]$Acide.tranexamique
+    outcome <- data_list[[i]][[4]]$DC.Trauma
+
+
+    df <- data_list[[i]][[4]] %>%
+              dplyr::select(-c("Acide.tranexamique", "DC.Trauma"))
+    
+    df.confounders <- df %>%
+                        dplyr::select(confounders)
+    
+    for (j in 1:length(methods_list)){
+        results_dr_mean_list[[idx]] <- dr(X=df.confounders, X.for.outcome = df,
+                                          ps.method = "grf.ate", out.method = "grf.ate",
+                                          treat=treatment, outcome =outcome, 
+                                          target = weights_list[[k]], 
+                                          seed=0, 
+                                          trimming_weight=weights_trim_list[[k]])
+       
+        
+        results_dr_mean <- rbind(results_dr_mean,
+                                 data.frame("Estimand" = estimands_list[[k]],
+                                            "Imputation.method" = data_list[[i]][[1]],
+                                            "Imputation.ind" = data_list[[i]][[2]],
+                                            "Imputation.var" = data_list[[i]][[3]],
+                                            "PS.estimation" = methods_list[[j]],
+                                            "ATE.p100" = results_dr_mean_list[[idx]][[1]]*100,
+                                            "STD.p100" = results_dr_mean_list[[idx]][[2]]*100))
+        
+        idx <- idx+1
+    }
+  }
+}
+
+knitr::kable(results_dr_mean, caption = "DR ATE estimations on mean imputed covariates", digits = 2)
+```
+
+
+## Plots
+```{r plot_ate_ipw_dr_grf, echo=F, warning = F, message = F}
+# Aggregate DR results
+levels(results_dr_misaem$PS.estimation) <- c("saem")
+
+results_dr <- rbind(results_dr_imp,
+                    results_dr_mia,
+                    results_dr_misaem,
+                    results_dr_mf,
+                    results_dr_mean)
+
+levels(results_dr$Imputation.method) <- toupper(levels(results_dr$Imputation.method))
+
+# Compare ATE estimation with PS obtained by GRF
+results_dr_ate <- results_dr %>%
+                     filter(Estimand == "ATE" & PS.estimation %in% c("grf", "grf.ate", "saem") & Imputation.method %in% c("MICE","FAMD","MF","-","MIA","MEAN")) %>%
+                     filter(!(Imputation.method %in% c("FAMD","MICE")) | (Imputation.method %in% c("FAMD","MICE") & Imputation.var == "2outcomes"))
+
+# Match ATE estimations with corresponding computed bootstrap CI bounds
+results_dr_ate$CI.inf.p100 <- results_dr_ate$ATE.p100 - 1.96*results_dr_ate$STD.p100
+results_dr_ate$CI.sup.p100 <- results_dr_ate$ATE.p100 + 1.96*results_dr_ate$STD.p100
+
+
+
+# Aggregate IPW results
+levels(results_ipw_misaem$PS.estimation) <- c("saem")
+
+results_ipw <- rbind(results_ipw_imp,
+                     results_ipw_mia,
+                     results_ipw_misaem,
+                     results_ipw_mf,
+                     results_ipw_mean)
+
+levels(results_ipw$Imputation.method) <- toupper(levels(results_ipw$Imputation.method))
+
+# Compare ATE estimation with PS obtained by GBM
+results_ipw_ate <- results_ipw %>%
+                     filter(Estimand == "ATE" & Imputation.method %in% c("MICE","FAMD","MF","-","MIA", "MEAN"))  %>%
+                     filter(!(Imputation.method %in% c("FAMD","MICE")) | (Imputation.method %in% c("FAMD","MICE") & Imputation.var == "2outcomes"))
+
+# Match ATE estimations with corresponding computed bootstrap CI bounds (if available)
+results_ipw_ate$CI.inf.p100 <- results_ipw_ate$ATE.p100 - 1.96*results_ipw_ate$STD.p100
+results_ipw_ate$CI.sup.p100 <- results_ipw_ate$ATE.p100 + 1.96*results_ipw_ate$STD.p100
+
+
+
+results_ate <- rbind(cbind(results_dr_ate, "type"=rep("dr", dim(results_dr_ate)[1])),
+                     cbind(results_ipw_ate,"type"=rep("ipw", dim(results_ipw_ate)[1])))
+
+levels(results_ate$PS.estimation) <- c("glm", "gbm", "grf.ate", "grf.ate", "saem")
+
+knitr::kable(results_ate, caption = "ATE estimations", digits = 2)
+
+results_ate$Imputation.set <- interaction(results_ate$Imputation.method,
+                                 results_ate$PS.estimation) 
+
+rows.subset <- 1:dim(results_ate)[1]#which(results_ate_logitreg$PS.estimation %in% c("saem", "grf"))
+
+
+ggplot(data=results_ate[rows.subset, ], 
+       aes(x=Imputation.set, y = ATE.p100, color=Imputation.method, shape = type)) +
+  geom_errorbar(aes(ymin=CI.inf.p100, ymax=CI.sup.p100, linetype = type), width=0.8, size=1) +
+  geom_line() +
+  geom_point() +
+  geom_hline(yintercept=0) +
+  coord_flip() + 
+  colScale +
+  theme(axis.text=element_text(size=15)) +
+  scale_x_discrete(labels = c("MEAN.grf.ate" = "(e) Mean", 
+                              "FAMD.grf.ate"="(a) imputation (PC-based)", 
+                              "-.saem"="(b) SAEM", 
+                              "MIA.grf.ate"="(c) MIA", 
+                              "MF.grf.ate"="(d) MF",
+                              "MICE.grf.ate" ="(f) imputation (MICE)"),
+                   limits = rev(c("FAMD.grf.ate", "-.saem",  "MIA.grf.ate", "MF.grf.ate", "MEAN.grf.ate", "MICE.grf.ate")),
+                   position="top") +
+  ylab("ATE (in %)") +
+  ylim(c(-20,20)) +
+  labs(title="ATE estimation", cex=0.7)
+
+#ggsave(paste0(fig.dir,Sys.Date(),"ipw_dr_ate_", population,"patients.pdf"), plot = last_plot())
+```
+       
