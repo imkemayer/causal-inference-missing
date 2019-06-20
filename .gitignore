@@ -6,3 +6,5 @@
 *.RData
 */Scripts/
 */Figures/
+*_files
+*_cache
