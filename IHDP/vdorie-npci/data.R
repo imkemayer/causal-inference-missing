@@ -60,7 +60,7 @@ loadDataInCurrentEnvironment <- function(covariates = "select", p.score = "none"
 
 
 
-generateDataForIterInCurrentEnvironment <- function(iter, x, z, w, mask=NULL, cit = F, cio = F, overlap = TRUE, covariates = "select", setting = "A", p.score = "none") {
+generateDataForIterInCurrentEnvironment <- function(iter, x, z, w, mask=NULL, cit = NULL, cio = NULL, overlap = TRUE, covariates = "select", setting = "A", p.score = "none") {
   getQuadraticTerms <- function(x)
   {
     terms <- character()
@@ -153,8 +153,10 @@ generateDataForIterInCurrentEnvironment <- function(iter, x, z, w, mask=NULL, ci
   }
   
   x.m.old <- x.m
-  if (!is.null(mask) & cio){
-    x.m[,-1][mask] <- 0
+  if (!is.null(mask) & !is.null(cio)){
+    if (cio){
+      x.m[,-1][mask] <- 0
+    }
   }
   if (setting == "B" || setting == "C") {
     mu.0 <- x.m %*% c(beta.m0, beta.q0)
@@ -163,19 +165,21 @@ generateDataForIterInCurrentEnvironment <- function(iter, x, z, w, mask=NULL, ci
     mu.0 <- exp((x.m + w.full) %*% beta)
     mu.1 <- x.m %*% beta
     
-    invlogit <- function(x) { e.x <- exp(x); e.x / (1.0 + e.x) }
-    x.m <- x.m.old
-    if ((!is.null(mask)) & cit){
-      x.m[,-1][mask] <- 0
+    if (!is.null(cit)){
+      invlogit <- function(x) { e.x <- exp(x); e.x / (1.0 + e.x) }
+      x.m <- x.m.old
+      if ((!is.null(mask)) & cit){
+        x.m[,-1][mask] <- 0
+      }
+      gamma <- runif(ncol(x.m), -0.5, 0.5)
+      lin.pred <- x.m %*% gamma
+      lin.pred <- lin.pred - median(lin.pred) - 1.35
+      ps.z <- invlogit(lin.pred)
+  
+      z <- rbinom(n, 1, ps.z)
+      if (all(z == 1) || all(z == 0)) browser()
+      callingEnv$ps.z <- ps.z
     }
-    gamma <- runif(ncol(x.m), -0.5, 0.5)
-    lin.pred <- x.m %*% gamma
-    lin.pred <- lin.pred - median(lin.pred) - 1.35
-    ps.z <- invlogit(lin.pred)
-
-    z <- rbinom(n, 1, ps.z)
-    if (all(z == 1) || all(z == 0)) browser()
-    callingEnv$ps.z <- ps.z
   }
   
   if (setting == "C") {
