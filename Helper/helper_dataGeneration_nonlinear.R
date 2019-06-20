@@ -47,6 +47,38 @@ gen_treat_lat <- function(x, class.interaction = FALSE, link = "nonlinear"){
     ps <- expit(f.x)
     treat <- sapply(ps, FUN= function(pr) rbinom(n=1, size=1, prob = pr))
   } 
+  else if (link == "nonlinear3"){
+    f.x <- 0
+    for (j in 1:length(x)){
+      f.x <- f.x + (mod(j,5)==1)*(x[j]*0.03*cos(5*x[j]) - 0.2*x[j]^2) +
+                   (mod(j,5)==2)*(-0.5*sin(x[j])) +
+                   (mod(j,5)==3)*(0.78*(x[j]>0)) +
+                   (mod(j,5)==4)*(-2.5*sqrt(abs(x[j])))
+      if (mod(j,5)==0) f.x <- f.x + (x[j-2]*x[j])
+    }
+    offsets <- c(0.5, -2, seq(-100, 100, length.out = 50))
+    balanced <- FALSE
+    i <- 1
+    best_idx <- 1
+    min_diff <- 1
+    while ((i <= length(offsets)) & !(balanced) ){
+      ps <- expit(offsets[i] + f.x)
+      treat <- sapply(ps, FUN= function(pr) rbinom(n=1, size=1, prob = pr))
+      
+      balanced <- (sum(treat==1)/length(treat) > 0.3 & sum(treat==1)/length(treat)<0.7)
+      
+      diff <- abs(sum(treat==1)/length(treat) - sum(treat==0)/length(treat))
+      if (diff < min_diff){
+        best_idx <- i
+        min_diff <- diff
+      }
+      i <- i+1
+    }
+    if (i > length(offsets)){
+      ps <- expit(offsets[best_idx] + f.x)
+      treat <- sapply(ps, FUN= function(p) rbinom(n=1, size=1, prob = p)) 
+    }
+  }
   else if (link=="linear") {
     if (class.interaction){
       class <- as.integer(x[length(x)])
@@ -98,7 +130,17 @@ gen_treat_svd <- function(x, class.interaction = FALSE, link = "nonlinear"){
       f.x <- as.numeric(-2 + 0.03*cos(5*x[1]) - 0.5*sin(x[2]) + x[3]*x[5] - 0.2*x[1]^2 +
                           0.78*(x[4]>0) + 2.5*sqrt(abs(x[10])))
     }
-  } else {
+  }
+  else if (link == "nonlinear3"){
+    f.x <- l0
+    for (j in 1:length(x)){
+      f.x <- f.x + (mod(j,5)==1)*(x[j]*0.03*cos(5*x[j]) - 0.2*x[j]^2) +
+        (mod(j,5)==2)*(-0.5*sin(x[j])) +
+        (mod(j,5)==3)*(0.78*(x[j]>0)) +
+        (mod(j,5)==4)*(-2.5*sqrt(abs(x[j])))
+      if (mod(j,5)==0) f.x <- f.x + (x[j-2]*x[j])
+    }
+  } else if (link == "linear") {
     if (class.interaction){
       class <- as.integer(x[length(x)])
       x <- x[1:length(x)-1]
@@ -143,7 +185,18 @@ gen_treat_deep <- function(x, link = "nonlinear"){
   if (link == "nonlinear"){
     f.x <- as.numeric(-1 + 0.3*cos(5*x[1]) - 0.1*sin(x[2]) - 0.1*x[3]*x[5] +
                         0.78*(x[4]>0) + sqrt(abs(x[10])))
-  } else {
+  } 
+  else if (link == "nonlinear3"){
+    f.x <- 0
+    for (j in length(x)){
+      f.x <- f.x + (mod(j,5)==1)*(x[j]*0.03*cos(5*x[j]) - 0.2*x[j]^2) +
+        (mod(j,5)==2)*(-0.5*sin(x[j])) +
+        (mod(j,5)==3)*(0.78*(x[j]>0)) +
+        (mod(j,5)==4)*(-2.5*sqrt(abs(x[j])))
+      if (mod(j,5)==0) f.x <- f.x + (x[j-2]*x[j])
+    }
+  }
+  else {
     beta <- array(c(0.15, -0.5, -0.1, 1, -0.53, 2), dim = length(x))
     f.x <- as.numeric(sum(x*beta))
   }
@@ -202,6 +255,22 @@ gen_out_lat <- function(x.w.c, class.interaction = FALSE, sd=0.1, link = "nonlin
                           (w==1)*((0.25*x[2]^2 - 0.15*x[1] + 0.04*x[10]^2 + 0.12*sqrt(abs(x[5])))>0)) + eps
       }
     }
+  } else if (link == "nonlinear3"){
+    if (class.interaction){
+      x <- x.w.c[1:(length(x.w.c)-2)]
+      w <- x.w.c[length(x.w.c)-1]
+      class <- as.integer(x.w.c[length(x.w.c)])
+      eps <- rnorm(n = 1, sd = sd, mean = 0)
+      beta <- array(c(-class*0.4, 0.154, 0.5/(class+1), -1.95/(class^2)), dim = length(x))
+      y <- as.numeric(exp(log(class+1) + sum(x*beta)) + w) + eps
+    } else {
+      x <- x.w.c[1:length(x.w.c)-1]
+      w <- x.w.c[length(x.w.c)]
+      eps <- rnorm(n = 1, sd = sd, mean = 0)
+      beta <- array(c(-0.2, 0.154, 0.5, -1.95), dim = length(x))
+      y <- as.numeric(exp(0.5 + sum(x*beta)) + w) + eps
+    }
+    
   } else {
     if (class.interaction){
       x <- x.w.c[1:(length(x.w.c)-2)]
@@ -238,6 +307,22 @@ gen_out_svd <- function(x.w.c, class.interaction = FALSE, sd=0.1, link = "nonlin
       y <- as.numeric(2.445 - (w==0)*(sin(0.4*x[1] + 0.154*x[2])+x[3]^2*x[1]*0.5 + 0.5*cos(x[5]^2+1) - 0.152*x[10]) - 
                         (w==1)*((0.25*x[2]^2 - 0.15*x[1] + 0.04*x[10]^2 + 0.12*sqrt(abs(x[5])))>0)) + eps
     }
+  } else if (link == "nonlinear3"){
+    if (class.interaction){
+      x <- x.w.c[1:(length(x.w.c)-2)]
+      w <- x.w.c[length(x.w.c)-1]
+      class <- as.integer(x.w.c[length(x.w.c)])
+      eps <- rnorm(n = 1, sd = sd, mean = 0)
+      beta <- array(c(-class*0.4, 0.154, 0.5/(class+1), -1.95/(class^2), 0.1, 0), dim = length(x))
+      y <- as.numeric(exp(log(class+1) + sum(x*beta)) + w) + eps
+    } else {
+      x <- x.w.c[1:length(x.w.c)-1]
+      w <- x.w.c[length(x.w.c)]
+      eps <- rnorm(n = 1, sd = sd, mean = 0)
+      beta <- array(c(-0.2, 0.154, 0.5, -1.95, 0.1, 0), dim = length(x))
+      y <- as.numeric(exp(0.5 + sum(x*beta)) + w) + eps
+    }
+    
   } else {
     if (class.interaction){
       x <- x.w.c[1:(length(x.w.c)-2)]

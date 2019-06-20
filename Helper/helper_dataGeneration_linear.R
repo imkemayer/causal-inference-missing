@@ -67,7 +67,7 @@ latent_confounders <- function(V, n=100, p=10,r=3,sig=0.25){ # sig=0.25
 gen_linear <- function(n, p=10, r = 3, setting = "linear1",
                        seed = 0, ps.dependence = "strong", sd = 1, 
                        mechanism=FALSE, prop.missing = 0,
-                       cit = FALSE, cio = FALSE,
+                       cit = FALSE, cio = FALSE, link = "log-lin",
                        V = NULL){
   # setting="linear1" 
   #   - case 1: mechanism="MCAR": p orthogonal covariates with NA in all covariates
@@ -225,14 +225,27 @@ gen_linear <- function(n, p=10, r = 3, setting = "linear1",
       alpha <- array(alpha.star.low, dim = dim(X.tmp)[2])
     }
   
+  
   offsets <- seq(-100, 100, length.out = 50)
   balanced <- FALSE
   i <- 1
   best_idx <- 1
   min_diff <- 1
   while ((i <= length(offsets)) & !(balanced) ){
-    prop_scores <- apply(data.frame(X.tmp), MARGIN=1, 
-                         FUN = function(z) expit(offsets[i]+2*(setting==3)+ z%*%alpha))
+    if (link == "log-lin"){
+      prop_scores <- apply(data.frame(X.tmp), MARGIN=1, 
+                          FUN = function(z) expit(offsets[i]+2*(setting==3)+ z%*%alpha))
+    } else {
+      prop_scores <- rep(0, dim(X.tmp)[1])
+      for (j in 1:dim(X.tmp)[2]){
+        prop_scores <- prop_scores + (mod(j,5)==1)*(X.tmp[,j]*0.03*cos(5*X.tmp[,j]) - 0.2*X.tmp[,j]^2) +
+                                     (mod(j,5)==2)*(-0.5*sin(X.tmp[,j])) +
+                                     (mod(j,5)==3)*(0.78*(X.tmp[,j]>0)) +
+                                     (mod(j,5)==4)*(-2.5*sqrt(abs(X.tmp[,j]))) +
+                                     (mod(j,5)==0)*(X.tmp[,j-2]*X.tmp[,j])
+      }
+      prop_scores <- expit(offsets[i] + prop_scores)
+    }
       
     # Treatment assignment
     treat <- sapply(prop_scores, FUN= function(p) rbinom(n=1, size=1, prob = p)) # ifelse(runif(n, 0, 1) <= c(prob_scores), 1, 0)
@@ -255,6 +268,7 @@ gen_linear <- function(n, p=10, r = 3, setting = "linear1",
     treat <- sapply(prop_scores, FUN= function(p) rbinom(n=1, size=1, prob = p))
   }
   
+  
   # Outcome
   epsilons <- rnorm(n, sd = sd)
   y <- rep(0,n)
@@ -268,10 +282,14 @@ gen_linear <- function(n, p=10, r = 3, setting = "linear1",
   beta <- array(beta.star[2:length(beta.star)], dim = dim(X.tmp)[2])
 
   
-  
-  y[which(treat==1)] <- X.tmp[which(treat==1),]%*%beta + beta.star[1] + tau + epsilons[which(treat==1)]
-  y[which(!(treat==1))] <- X.tmp[which(!(treat==1)),]%*%beta + beta.star[1] + epsilons[which(!(treat==1))]
-
+  if (link == "log-lin"){
+    y[which(treat==1)] <- X.tmp[which(treat==1),]%*%beta + beta.star[1] + tau + epsilons[which(treat==1)]
+    y[which(!(treat==1))] <- X.tmp[which(!(treat==1)),]%*%beta + beta.star[1] + epsilons[which(!(treat==1))]
+  }
+  else {
+    y[which(treat==1)] <- exp(X.tmp[which(treat==1),]%*%beta + beta.star[1]) + tau + epsilons[which(treat==1)]
+    y[which(!(treat==1))] <- exp(X.tmp[which(!(treat==1)),]%*%beta + beta.star[1]) + epsilons[which(!(treat==1))]
+  }
   if (setting == 3){
     X <- X.proxy
   }
