@@ -143,6 +143,7 @@ ipw <- function(X, outcome, treat,
   # Add response mask
   if (!is.null(mask)){
     colname <- colnames(X)
+    print(colname)
     X <- cbind(X, mask)
     length.mask <- dim(mask)[2]
     if (length.mask>0){
@@ -204,7 +205,7 @@ ipw <- function(X, outcome, treat,
   # Compute HT verion of IPW
   ipw1 <- 1/length(outcome)*(sum(outcome[which(treat==1)]*fitted$weight[which(treat==1)]) - sum(outcome[which(!(treat==1))]*fitted$weight[which(!(treat==1))]))
   
-  # Computed normalized version of IPW
+  # Compute normalized version of IPW
   ipw2 <- 1/sum(fitted$weight[which(treat==1)]) * sum(outcome[which(treat==1)] * fitted$weight[which(treat==1)]) - 1/sum(fitted$weight[which(!(treat==1))]) * sum(outcome[which(!(treat==1))] * fitted$weight[which(!(treat==1))])
   
   if (ps.method == "glm"){
@@ -260,7 +261,7 @@ dr <- function(X,
   #' @param use.interaction [boolean] whether to add interactions between fully observed confounders and the mask (optional)
 
   #' @return The average treatment effect estimate and an estimate of its standard deviation
-
+  
   ##################
   # Propensity model
   ##################
@@ -370,9 +371,8 @@ dr <- function(X,
     length.mask <- dim(mask)[2]
   }
   if (length.mask>0){
-    colnames(X2) <- c(colname, paste0("R",1:length.mask))
+    colnames(X2) <- c(colnames(X), paste0("R",1:length.mask))
   }
-
 
   # Use grf regression forests to fit propensity and outcome models and then use AIPW formula for treatment effect estimation
   if (ps.method == "grf" & out.method == "grf"){
@@ -408,11 +408,10 @@ dr <- function(X,
   } 
 
   # Use EM for linear outcome model (either on complete(d) or incomplete X)
-  if (out.method == "glm"){
+  if (out.method %in% c("glm", "gbm")){ # "gbm" is only available for complete data
 
     # Regular EM for linear regression Y ~ X to predict potential outcomes
     if (sum(is.na(X))==0){
-      
       if (use.interaction & length.mask > 0 & length(col.complete) > 0){
         xnam1 <- paste("X", 1:length.covariates, sep="")
         xnam2 <- paste("X", col.complete, sep="")
@@ -432,21 +431,34 @@ dr <- function(X,
       colnames(df.control) <- c("y", paste("X", 1:dim(X2)[2], sep=""))
       
       df.treated <- df.treated[!duplicated(df.treated[,2:ncol(df.treated)]),]
-      one.level <- sapply(df.treated, FUN = function(x) length(unique(x))==1)
-      df.treated <- df.treated[,!one.level]
+      one.level.treated <- sapply(df.treated, FUN = function(x) length(unique(x))==1)
+      df.treated <- df.treated[,!one.level.treated]
       fmla <- as.formula(paste0("y ~ ", paste( colnames(df.treated[,2:ncol(df.treated)]), collapse= "+")))
-      lm.treated <- lm(fmla, data = df.treated)
+      if (out.method == "glm"){
+        lm.treated <- lm(fmla, data = df.treated)
+      } else {
+        if (length(unique(df.treated[,1]))==2){ y = as.factor(df.treated[,1]) } else { y = df.treated[,1] }
+        lm.treated <- train(y= y,
+                       x=data.frame(df.treated[,-1]), method="gbm",
+                       trControl = trainControl(method="cv",number=5), verbose = FALSE)
+      }
 
       df.control <- df.control[!duplicated(df.control[,2:ncol(df.control)]),]
-      one.level <- sapply(df.control, FUN = function(x) length(unique(x))==1)
-      df.control <- df.control[,!one.level]
+      one.level.control <- sapply(df.control, FUN = function(x) length(unique(x))==1)
+      df.control <- df.control[,!one.level.control]
       fmla <- as.formula(paste0("y ~ ", paste( colnames(df.control[,2:ncol(df.control)]), collapse= "+")))
-      lm.control <- lm(fmla, data = df.control)
+      if (out.method == "glm"){
+        lm.control <- lm(fmla, data = df.treated)
+      } else {
+        if (length(unique(df.control[,1]))==2) { y = as.factor(df.control[,1]) } else { y = df.control[,1] }
+        lm.control <- train(y= y,
+                       x=data.frame(df.control[,-1]), method="gbm",
+                       trControl = trainControl(method="cv",number=5), verbose = FALSE)
+      }
 
       colnames(X2) <- paste("X", 1:dim(X2)[2], sep="")
-      y_1.hat <- predict(lm.treated, X2)
-      y_0.hat <- predict(lm.control, X2)
-      
+      y_1.hat <- as.numeric(predict(lm.treated, X2[,!one.level.treated[-1]]))
+      y_0.hat <- as.numeric(predict(lm.control, X2[,!one.level.control[-1]]))
     }
 
     # EM for linear regression Y ~ X with missing values to predict potential outcomes 
