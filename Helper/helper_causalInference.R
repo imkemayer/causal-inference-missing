@@ -472,7 +472,7 @@ dr <- function(X,
         X2 <- as.matrix(X[which(treat==max(as.numeric(treat))),])
         colname <- colnames(data.frame(X2))
         length.mask <- dim(mask)[2]
-        X2 <- cbind(X2, as.matrix(mask[which(treat==max(as.numeric(treat))),]))
+        X2 <- data.frame(cbind(X2, as.matrix(mask[which(treat==max(as.numeric(treat))),])))
         if (length.mask>0){
           colnames(X2) <- c(colname, paste0("R",1:length.mask))
         }
@@ -495,7 +495,16 @@ dr <- function(X,
         }
       }
       dim2.X <- dim(X2)[2]
-      mod.t <- prelim.norm(X2)
+      tmp <- X2
+      tmp[is.na(tmp)] <- -1e5
+      rm.cols.treated <- c()
+      rm.cols.treated <- caret::findLinearCombos(tmp)$remove
+      dim2.X <- dim2.X - length(rm.cols.treated)
+      if (length(rm.cols.treated)>0){
+        mod.t <- prelim.norm(as.matrix(X2[,-rm.cols.treated]))
+      } else{
+        mod.t <- prelim.norm(as.matrix(X2))
+      }
       thetahat <- em.norm(mod.t, showits = F)
       pars <- getparam.norm(mod.t, thetahat)
       sig.inv <- solve(pars$sigma[2:dim2.X,2:dim2.X])
@@ -513,7 +522,7 @@ dr <- function(X,
         X2 <- as.matrix(X[which(treat==min(as.numeric(treat))),])
         colname <- colnames(data.frame(X2))
         length.mask <- dim(mask)[2]
-        X2 <- cbind(X2, as.matrix(mask[which(treat==min(as.numeric(treat))),]))
+        X2 <- data.frame(cbind(X2, as.matrix(mask[which(treat==min(as.numeric(treat))),])))
         if (length.mask>0){
           colnames(X2) <- c(colname, paste0("R",1:length.mask))
         }
@@ -536,7 +545,16 @@ dr <- function(X,
         }
       }
       dim2.X <- dim(X2)[2]
-      mod.t <- prelim.norm(X2)
+      tmp <- X2
+      tmp[is.na(tmp)] <- -1e5
+      rm.cols.control <- c()
+      rm.cols.control <- caret::findLinearCombos(tmp)$remove
+      dim2.X <- dim2.X - length(rm.cols.control)
+      if (length(rm.cols.control)>0){
+        mod.t <- prelim.norm(as.matrix(X2[,-rm.cols.control]))
+      } else{
+        mod.t <- prelim.norm(as.matrix(X2))
+      }
       thetahat <- em.norm(mod.t, showits = F)
       pars <- getparam.norm(mod.t, thetahat)
       sig.inv <- solve(pars$sigma[2:dim2.X,2:dim2.X])
@@ -590,10 +608,17 @@ dr <- function(X,
       #
       # X2 <- get_imputeEM(as.matrix(cbind(X)))$Ximp
       # X2 <- X2[ ,1:dim2.X]
-
-
-      y_1.hat <- as.matrix(X2, ncol=dim(X2)[2])%*%beta_treated[2:(dim(X2)[2]+1)] + beta_treated[1]
-      y_0.hat <- as.matrix(X2, ncol=dim(X2)[2])%*%beta_control[2:(dim(X2)[2]+1)] + beta_control[1]
+      
+      X2.treated <- X2
+      X2.control <- X2
+      if (length(rm.cols.treated)>0){
+        X2.treated <- X2[,-rm.cols.treated]
+      }
+      if (length(rm.cols.control)>0){
+        X2.control <- X2[,-rm.cols.control]
+      }
+      y_1.hat <- as.matrix(X2.treated, ncol=dim(X2.treated)[2])%*%beta_treated[2:(dim(X2.treated)[2]+1)] + beta_treated[1]
+      y_0.hat <- as.matrix(X2.control, ncol=dim(X2.control)[2])%*%beta_control[2:(dim(X2.control)[2]+1)] + beta_control[1]
     }
     
      
