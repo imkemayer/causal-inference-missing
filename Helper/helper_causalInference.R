@@ -448,7 +448,7 @@ dr <- function(X,
       df.control <- df.control[,!one.level.control]
       fmla <- as.formula(paste0("y ~ ", paste( colnames(df.control[,2:ncol(df.control)]), collapse= "+")))
       if (out.method == "glm"){
-        lm.control <- lm(fmla, data = df.treated)
+        lm.control <- lm(fmla, data = df.control)
       } else {
         if (length(unique(df.control[,1]))==2) { y = as.factor(df.control[,1]) } else { y = df.control[,1] }
         lm.control <- train(y= y,
