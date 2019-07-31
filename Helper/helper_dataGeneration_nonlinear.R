@@ -50,10 +50,10 @@ gen_treat_lat <- function(x, class.interaction = FALSE, link = "nonlinear"){
   else if (link == "nonlinear3"){
     f.x <- 0
     for (j in 1:length(x)){
-      f.x <- f.x + (mod(j,5)==1)*(x[j]*0.03*cos(5*x[j]) - 0.2*x[j]^2) +
-                   (mod(j,5)==2)*(-0.5*sin(x[j])) +
-                   (mod(j,5)==3)*(0.78*(x[j]>0)) +
-                   (mod(j,5)==4)*(-2.5*sqrt(abs(x[j])))
+      f.x <- f.x + (mod(j,5)==1)*(10*((x[j]<quantile(x[j],0.7)) + (x[j]> quantile(x[j],0.2)))) +
+	                (mod(j,5)==2)*(5*exp(0.2*x[j])*x[1]) +
+        					(mod(j,5)==3)*(8*(x[j]*(x[1]>0))) +
+	                ((mod(j,5)==4)*(-2.5*sqrt(abs(x[j]))))
       if (mod(j,5)==0) f.x <- f.x + (x[j-2]*x[j])
     }
     offsets <- c(0.5, -2, seq(-100, 100, length.out = 50))
@@ -132,12 +132,12 @@ gen_treat_svd <- function(x, class.interaction = FALSE, link = "nonlinear"){
     }
   }
   else if (link == "nonlinear3"){
-    f.x <- l0
+    f.x <- 0
     for (j in 1:length(x)){
-      f.x <- f.x + (mod(j,5)==1)*(x[j]*0.03*cos(5*x[j]) - 0.2*x[j]^2) +
-        (mod(j,5)==2)*(-0.5*sin(x[j])) +
-        (mod(j,5)==3)*(0.78*(x[j]>0)) +
-        (mod(j,5)==4)*(-2.5*sqrt(abs(x[j])))
+      f.x <- f.x + (mod(j,5)==1)*(10*((x[j]<quantile(x[j],0.7)) + (x[j]> quantile(x[j],0.2)))) +
+	                (mod(j,5)==2)*(5*exp(0.2*x[j])*x[1]) +
+        					(mod(j,5)==3)*(8*(x[j]*(x[1]>0))) +
+	                ((mod(j,5)==4)*(-2.5*sqrt(abs(x[j]))))
       if (mod(j,5)==0) f.x <- f.x + (x[j-2]*x[j])
     }
   } else if (link == "linear") {
@@ -188,11 +188,11 @@ gen_treat_deep <- function(x, link = "nonlinear"){
   } 
   else if (link == "nonlinear3"){
     f.x <- 0
-    for (j in length(x)){
-      f.x <- f.x + (mod(j,5)==1)*(x[j]*0.03*cos(5*x[j]) - 0.2*x[j]^2) +
-        (mod(j,5)==2)*(-0.5*sin(x[j])) +
-        (mod(j,5)==3)*(0.78*(x[j]>0)) +
-        (mod(j,5)==4)*(-2.5*sqrt(abs(x[j])))
+    for (j in 1:length(x)){
+      f.x <- f.x + (mod(j,5)==1)*(10*((x[j]<quantile(x[j],0.7)) + (x[j]> quantile(x[j],0.2)))) +
+	                (mod(j,5)==2)*(5*exp(0.2*x[j])*x[1]) +
+        					(mod(j,5)==3)*(8*(x[j]*(x[1]>0))) +
+	                ((mod(j,5)==4)*(-2.5*sqrt(abs(x[j]))))
       if (mod(j,5)==0) f.x <- f.x + (x[j-2]*x[j])
     }
   }
@@ -262,6 +262,7 @@ gen_out_lat <- function(x.w.c, class.interaction = FALSE, sd=0.1, link = "nonlin
       class <- as.integer(x.w.c[length(x.w.c)])
       eps <- rnorm(n = 1, sd = sd, mean = 0)
       beta <- array(c(-class*0.4, 0.154, 0.5/(class+1), -1.95/(class^2)), dim = length(x))
+
       y <- as.numeric(exp(log(class+1) + sum(x*beta)) + w) + eps
     } else {
       x <- x.w.c[1:length(x.w.c)-1]
@@ -350,7 +351,16 @@ gen_out_deep <- function(x.w.c, sd=0.1, link = "nonlinear"){
   if (link == "nonlinear"){
     y <- as.numeric(2.445 - (w==0)*((sin(0.4*x[1] + 0.154*x[2]) - 1/(x[3]^2*x[1]) + 0.5*cos(x[5]^2+1) - 0.152*x[10])>0) +
       (w==1)*((0.25*x[2]^2 - 0.15*x[1] + 0.04*x[10]^2 + 0.12*sqrt(abs(x[5])))>0)) + eps 
-  } else {
+  } 
+  else if (link == "nonlinear3"){
+    x <- x.w.c[1:length(x.w.c)-1]
+    w <- x.w.c[length(x.w.c)]
+    eps <- rnorm(n = 1, sd = sd, mean = 0)
+    beta <- array(c(-0.2, 0.154, 0.5, -1.95), dim = length(x))
+    y <- as.numeric(exp(0.5 + sum(x*beta)) + w) + eps
+    
+  } 
+  else {
     beta <- array(c(-0.2, 0.154, 0.5, -1.95, 0.1, 0), dim = length(x))
     y <- as.numeric(0.5 + sum(x*beta) + w) + eps
   }
@@ -455,10 +465,20 @@ gen_latentclass <- function(n, p, nb.class=3, mus = NULL, Sigmas = NULL, class.i
   }
   
   X.tmp <- X
+  
+  
+  if (link == "nonlinear3"){
+  	for (j in 1:dim(X.tmp)[2]){
+	    X.tmp[,j] <-(mod(j,5)==1)*(((X.tmp[,j]<quantile(X.tmp[,j],0.7)) + (X.tmp[,j]> quantile(X.tmp[,j],0.2)))) +
+        					(mod(j,5)==2)*(1/(0.001+exp(X.tmp[,j]*x[1]))) +
+        					(mod(j,5)==3)*(-(X.tmp[,j])*(X.tmp[,2]>0)) +
+        					(mod(j,5)==4)*(-2.5*sqrt(abs(X.tmp[,j])))
+		} 
+  }
   if (cio){
     X.tmp[idx_NA] <- 0
   }
-  
+
   if (class.interaction){
     y <- apply(cbind(X.tmp, treat, class), MARGIN=1, FUN = function(x) gen_out_lat(x, class.interaction, sd=sd, link = link))
   } else {
@@ -576,6 +596,14 @@ gen_multisvd <- function(n, p, ngr = 5, ncpW = 2, ncpB = 2,
   }
   
   X.tmp <- X
+  if (link == "nonlinear3"){
+  	for (j in 1:dim(X.tmp)[2]){
+	    X.tmp[,j] <-(mod(j,5)==1)*(((X.tmp[,j]<quantile(X.tmp[,j],0.7)) + (X.tmp[,j]> quantile(X.tmp[,j],0.2)))) +
+        					(mod(j,5)==2)*(1/(0.001+exp(X.tmp[,j]*x[1]))) +
+        					(mod(j,5)==3)*(-(X.tmp[,j])*(X.tmp[,2]>0)) +
+        					(mod(j,5)==4)*(-2.5*sqrt(abs(X.tmp[,j])))
+		} 
+  }
   if (cio){
     X.tmp[idx_NA] <- 0
   }
@@ -702,6 +730,14 @@ gen_dlvm <- function(n, p, d=3, h = 5,
 
   
   X.tmp <- X
+  if (link == "nonlinear3"){
+  	for (j in 1:dim(X.tmp)[2]){
+	    X.tmp[,j] <-(mod(j,5)==1)*(((codes[,j]<quantile(codes[,j],0.7)) + (codes[,j]> quantile(codes[,j],0.2)))) +
+        					(mod(j,5)==2)*(1/(0.001+exp(codes[,j]*x[1]))) +
+        					(mod(j,5)==3)*(-(codes[,j])*(codes[,2]>0)) +
+        					(mod(j,5)==4)*(-2.5*sqrt(abs(codes[,j])))
+		} 
+  }
   if (cio){
     X.tmp[idx_NA] <- 0
   }
@@ -723,6 +759,122 @@ gen_dlvm <- function(n, p, d=3, h = 5,
               "class" = NULL))
 }
 
+gen_dlvm2 <- function(n, p, d=3, h = 5,
+                     sd=0.1, 
+                     seed = 0,
+                     mechanism=FALSE, prop.missing = 0, 
+                     cit = FALSE, cio = FALSE,
+                     link = "nonlinear",
+                     sigma.structure = "diagonal"){
+  set.seed(0)
+  gamma.mar.x <- (20/p)*(runif(n=floor(p/2))-0.5)
+  
+  
+  V <- mvrnorm(n=p, mu= rep(1,h), Sigma = diag(h))
+  W <- matrix(runif(n = h*d), ncol = d, nrow = h)
+  a <- runif(n=h)
+  b <- rnorm(n=p)
+  
+  if (sigma.structure == "diagonal"){
+    alpha <- rnorm(n = h)
+    beta <- runif(n = 1)
+  } else {
+    alpha <- mvrnorm(n = p, mu = rep(0,h), Sigma = diag(h))
+    beta <- runif(n = p)
+    U <- randortho(n = p, type="orthonormal")
+  }
+  set.seed(seed)
+  
+  get_params <- function(z){
+    hu<-W%*%z + a
+    
+    if (sigma.structure == "diagonal"){
+      mu <- (V%*%tanh(hu) + b)
+      sig <- as.numeric(exp(t(alpha)%*%tanh(hu) + beta))
+      Sigma <- sig*diag(p)
+    } else {
+      mu <- U%*%(V%*%tanh(hu) + b)
+      Sigma <- U%*%diag(array(exp(alpha%*%tanh(hu) + beta)), nrow = p)%*%t(U)
+    }
+    return(list(mu=mu, Sigma = Sigma))
+  }
+  
+  
+  codes <- mvrnorm(n=n, mu = rep(0, d), Sigma = diag(d))
+  
+  params <- apply(codes, FUN = get_params, MARGIN = 1)
+  
+  X.list <- lapply(params, FUN = function(eta) mvrnorm(n=1, mu = eta$mu, Sigma = eta$Sigma))
+  X <- do.call(rbind, X.list)
+  
+  X <- data.frame(X)
+  
+  # MISSING DATA
+  X.incomp <- X
+  idx_NA <- NULL
+  if (mechanism == "MCAR"){
+    idx_NA = matrix(runif(n*dim(X)[2]), nrow=n, ncol=dim(X)[2]) <= prop.missing
+    idx_NA[rowSums(idx_NA)==ncol(X), sample(ncol(X),1)] = FALSE # avoid having empty observations
+    X.incomp[idx_NA] <- NA
+  }
+  if (mechanism == "MAR"){
+    idx_NA <- c()
+    for (j in 1:ceiling(p/2)) {
+      m <- sapply(expit(2 + X[,(ceiling(p/2)+1):p]%*%gamma.mar.x), FUN= function(pr) rbinom(n=1, size=1, prob = pr))
+      X.incomp[which(m==1), j] <- NA
+      idx_NA <- cbind(idx_NA, m==1)
+    }
+    idx_NA <- cbind(idx_NA, matrix(FALSE, nrow = n, ncol = floor(p/2)))
+    idx_NA <- matrix(idx_NA, nrow=n, ncol = p)
+    
+  } 
+  if (mechanism == "MNAR"){
+    idx_NA <- c()
+    for (j in 1:ceiling(p/2)) {
+      if (prop.missing > 0.4 & prop.missing < 0.6){
+        m <- (mod(j,2)==0)*(X[,j]<median(X[,j])) + (mod(j,2)==1)*(X[,j]>median(X[,j]))
+      } else {
+        m <- (mod(j,2)==0)*(X[,j]<quantile(X[,j], prop.missing)) + (mod(j,2)==1)*(X[,j]>quantile(X[,j], 1-prop.missing))
+      }
+      X.incomp[which(m==1), j] <- NA
+      idx_NA <- cbind(idx_NA, m==1)
+    }
+    idx_NA <- cbind(idx_NA, matrix(FALSE, nrow = n, ncol = floor(p/2)))
+    idx_NA <- matrix(idx_NA, nrow=n, ncol = p)
+  }
+  
+  # TREATMENT ASSIGNMENT
+  
+  assignment <- apply(codes, MARGIN=1, FUN = function(x) gen_treat_deep(x, link = link))
+  ps <- assignment[1,]
+  treat <- assignment[2,]
+  
+
+  if (link == "nonlinear3"){
+  	for (j in 1:dim(codes)[2]){
+	    codes[,j] <-(mod(j,5)==1)*(((codes[,j]<quantile(codes[,j],0.7)) + (codes[,j]> quantile(codes[,j],0.2)))) +
+        					(mod(j,5)==2)*(1/(0.001+exp(codes[,j]*x[1]))) +
+        					(mod(j,5)==3)*(-(codes[,j])*(codes[,2]>0)) +
+        					(mod(j,5)==4)*(-2.5*sqrt(abs(codes[,j])))
+		} 
+  }
+
+  y <- apply(cbind(codes, treat), MARGIN=1, FUN = function(x) gen_out_deep(x, sd=sd, link = link))
+  
+  
+  y.1 <- apply(cbind(codes, rep(1, n)), MARGIN=1, FUN = function(x) gen_out_deep(x, sd=sd, link = link))
+  y.0 <- apply(cbind(codes, rep(0, n)), MARGIN=1, FUN = function(x) gen_out_deep(x, sd=sd, link = link))
+  
+  tau <- y.1 - y.0
+  
+  return(list("X" = X,
+              "ps" = ps,
+              "treat" = treat,
+              "y" = y,
+              "X.incomp" = X.incomp,
+              "tau" = tau,
+              "class" = codes))
+}
 
 gen_ding <- function(n, set = 1,
                      seed = 0,
@@ -765,5 +917,4 @@ gen_ding <- function(n, set = 1,
               "tau" = rep(1,n),
               "class" = NULL))
 }
-
 

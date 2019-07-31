@@ -53,7 +53,7 @@ perturbation_gaussian <- function(design, noise_sd = 5){
 }
 
 #Data matrix and parameter matrix simulations 
-latent_confounders <- function(V, n=100, p=10,r=3,sig=0.25){ # sig=0.25
+latent_confounders <- function(V, n=100, p=10,r=3,sig=0.1){ # sig=0.25
   
   design <- design_matrix(V, n, r, p)
   X.noisy <- design$X
@@ -196,9 +196,9 @@ gen_linear <- function(n, p=10, r = 3, setting = "linear1",
         idx_NA <- c()
         for (j in 1:ceiling(p/2)) {
           if (prop.missing > 0.4 & prop.missing < 0.6){
-            m <- (mod(j,2)==0)*(X[,j]<median(X[,j])) + (mod(j,2)==1)*(X[,j]>median(X[,j]))
+            m <- (mod(j,2)==0)*(X.incomp[,j]<median(X.incomp[,j])) + (mod(j,2)==1)*(X.incomp[,j]>median(X.incomp[,j]))
           } else {
-            m <- (mod(j,2)==0)*(X[,j]<quantile(X[,j], prop.missing)) + (mod(j,2)==1)*(X[,j]>quantile(X[,j], 1-prop.missing))
+            m <- (mod(j,2)==0)*(X.incomp[,j]<quantile(X.incomp[,j], prop.missing)) + (mod(j,2)==1)*(X.incomp[,j]>quantile(X.incomp[,j], 1-prop.missing))
           }
           X.incomp[which(m==1), j] <- NA
           idx_NA <- cbind(idx_NA, m==1)
