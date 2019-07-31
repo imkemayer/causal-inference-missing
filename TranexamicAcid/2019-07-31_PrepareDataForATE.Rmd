@@ -1,0 +1,729 @@
+---
+title: "Prepare and save data for Treatment Effect of Tranexamic Acid on TBI patients"
+author: "Imke Mayer"
+date: "07/31/2019"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 4
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache= FALSE)
+```
+
+**Same as 2019-06-06_PrepareDataForATE.Rmd except for adding `Remplissage.total.cristalloides` and `Remplissage.total.colloides` as confounders.**
+
+
+**We use the following set of confounders in this analysis: `Trauma.Center`, `PAS.min, PAD.min, FC.max`, `Choc.index` (`FC.max`/`PAS.min`), `ACR.1`, `Catecholamines`, `Hemocue.ph`, `Hemoglobine.ph`, `Delta.hemocue`, `Delta.choc.index`, `AIS.externe`, `Remplissage.total.cristalloides` and `Remplissage.total.colloides`.**
+
+
+
+# Preliminaries
+
+## Load libraries
+
+```{r load_libraries, results='hide'}
+
+suppressPackageStartupMessages(library(cobalt))
+suppressPackageStartupMessages(library(ggplot2))
+suppressPackageStartupMessages(library(dplyr))
+suppressPackageStartupMessages(library(reshape2))
+suppressPackageStartupMessages(library(tableone))
+
+suppressPackageStartupMessages(library(caret)) # 
+suppressPackageStartupMessages(library(randomForest)) # Random Forests
+suppressPackageStartupMessages(library(ranger)) # Random Forests prediction
+suppressPackageStartupMessages(library(FactoMineR)) # Factorial data analysis
+suppressPackageStartupMessages(library(grf)) # Doubly robust treatment effect estimation
+
+suppressPackageStartupMessages(library(misaem)) # Logistic regression with missing values
+suppressPackageStartupMessages(library(missMDA)) # PCA/MCA with missing values + iterative PC imputation
+suppressPackageStartupMessages(library(missForest)) # Random forests with missing values
+suppressPackageStartupMessages(library(mice)) # Multiple imputation
+suppressPackageStartupMessages(library(naniar)) # Missing values exploration and visualization
+suppressPackageStartupMessages(library(VIM)) # Missing values exploration and visualization
+suppressPackageStartupMessages(library(BaylorEdPsych)) # Little's MCAR test
+
+
+# Set random generator seed for reproducible results
+set.seed(0)
+```
+
+
+## Prepare the data for imputation and/or inferences
+
+### Load the data
+```{r load_data, , results='hide'}
+setwd("~/Documents/TraumaMatrix/Hopitaux/Data/wetransfer-0bf094/")
+
+rawData <- read.csv("Ftry.csv", header = TRUE, encoding = "utf-8",  fileEncoding = "CP1252", na.strings = c("", "NR", "NA", "NF","IMP"))
+
+# selectedData <- rawData[, c("Traitement.anticoagulant", "Traitement.antiagregants", "Glasgow.initial", "Glasgow.moteur.initial" , "Mydriase", "Mannitol.SSH", "Regression.mydriase.sous.osmotherapie", "ACR.1", "PAS.min", "PAD.min", "FC.max", "PAS.SMUR", "PAD.SMUR", "FC.SMUR", "Lactates.prehosp", "Catecholamines", "SpO2.min", "Hemocue.init", "IOT.SMUR", "Temps.lieux.hop", "Anomalie.pupillaire" , "FC", "PAS", "PAD", "SpO2", "DTC.IP.max", "Lactates", "pCO2", "PaO2", "Ventilation.FiO2", "Hb", "Plaquettes", "TP.pourcentage","Fibrinogene.1","Alcool","KTV.poses.avant.TDM","Dose.NAD.depart","Choc.hemorragique","Trauma.cranien","AIS.tete","AIS.face", "AIS.thorax",	"AIS.abdo.pelvien", "AIS.membres.bassin",	"AIS.externe", "ISS.2", "IGS.II", "Bloc.J0.neurochirurgie", "Osmotherapie","PIC","DVE","Hypothermie.therapeutique","Craniectomie.decompressive", "Acide.tranexamique", "Acide.tranexamique.choc.hemorragique","DC.en.rea","Cause.du.DC","Glasgow.sortie")]
+
+
+# Based on causal graph (2019-07-31)
+selectedData <- rawData[, c("Traitement.anticoagulant", "Traitement.antiagregants", 
+                            "Glasgow.initial", "Glasgow.moteur.initial" , 
+                            "Mydriase", "Mannitol.SSH", "Regression.mydriase.sous.osmotherapie", 
+                            "ACR.1", "PAS.min", "PAD.min", "FC.max", "PAS.SMUR", "PAD.SMUR", "FC.SMUR",
+                            "Catecholamines", "SpO2.min", "Hemocue.init", "IOT.SMUR", 
+                            "Temps.lieux.hop",
+                            "Anomalie.pupillaire" , 
+                            "FC", "PAS", "PAD", "SpO2", "DTC.IP.max", "Ventilation.FiO2", "Hb",
+                            "Choc.hemorragique",
+                            "Trauma.cranien","AIS.tete","AIS.face", "AIS.externe", "ISS.2", "IGS.II",
+                            "Bloc.J0.neurochirurgie", "Osmotherapie", "PIC", "DVE", "Craniectomie.decompressive", "Acide.tranexamique", "Acide.tranexamique.choc.hemorragique","DC.en.rea","Cause.du.DC","Glasgow.sortie",
+                            "Remplissage.total.cristalloides", "Remplissage.total.colloides")]
+
+# We will keep the center information for the exploration step
+selectedData$Trauma.Center <- rawData$Centre
+
+selectedData$Delta.hemocue <- rawData$Hemocue.init - rawData$Hemocue.arrivee.hop
+```
+
+### Pre-process the data (eliminate erronous cases, recode some covariates)
+
+We delete the only patient that has a value "2" for the binary variable `ACR.1`:
+```{r}
+selectedData <- selectedData %>%
+              filter(!(selectedData[,"ACR.1"] %in% c("2")))
+```
+
+
+We remove observations from the Trauma center Lille since there are only 2 observations from this centre and they both got treatment (so no observation in the control group for this center)
+```{r delete_lille}
+selectedData<- selectedData %>%
+                filter(!(Trauma.Center %in% c("Lille")))
+
+```
+
+Furthermore, we must recode some of the variables:
+```{r, warning=FALSE}
+recode_NR_by_NA <- function(df, feature_name, to_numeric){
+  if (feature_name %in% colnames(df)){
+    if (to_numeric){
+      df[,feature_name] <- as.numeric(as.character(df[,feature_name]))
+    } else {
+      df[,feature_name] <- as.factor(df[,feature_name])
+    }
+  }
+  return(df)
+}
+
+# Binary and other categorical variables
+features_to_recode_1 <- c("Traitement.anticoagulant", "Traitement.antiagregants", "Mannitol.SSH",
+                        "Regression.mydriase.sous.osmotherapie",
+                        "Catecholamines", "Ventilation.FiO2", "IOT.SMUR",
+                        "KTV.poses.avant.TDM", "Choc.hemorragique",
+                        "Cause.du.DC", "ACR.1",
+                        "DC.en.rea","Trauma.cranien", "PIC", "DVE", "Hypothermie.therapeutique", "Craniectomie.decompressive", "Acide.tranexamique", "Acide.tranexamique.choc.hemorragique", "Bloc.J0.neurochirurgie",
+                        "Trauma.Center")
+
+# Future work: automatic selection of qualitative/quantitative covariates, but problem is that not all qualitative variables are encoded as factors but sometimes as integers. TBC.
+# features.quali = selectedData[, sapply(selectedData, is.factor)] 
+
+# Numerical variables
+features_to_recode_2 <- c("PAS.min", "PAD.min",
+                          "FC.max", "PAS.SMUR", "PAD.SMUR", "FC.SMUR", "ISS.2", "IGS.II",
+                          "Hemocue.init", "Delta.hemocue",
+                          "Temps.lieux.hop", "SpO2.min",
+                          "Dose.NAD.depart", "FC", "PAS", "PAD", "SpO2", "DTC.IP.max",
+                          "pCO2", "PaO2","Plaquettes","Lactates.prehosp", "TP.pourcentage",
+                          "Glasgow.sortie", "AIS.tete", "AIS.face", "AIS.thorax",	"AIS.abdo.pelvien", "AIS.membres.bassin",	"AIS.externe", "Glasgow.initial", "Glasgow.moteur.initial", "Alcool", "Remplissage.total.cristalloides", "Remplissage.total.colloides")
+
+# features.quanti = selectedData[, sapply(selectedData, is.numeric)] 
+
+for (f in features_to_recode_1){
+  selectedData <- recode_NR_by_NA(selectedData, f, to_numeric = FALSE)
+}
+
+for (f in features_to_recode_2){ 
+  selectedData <- recode_NR_by_NA(selectedData, f, to_numeric = TRUE)
+}
+```
+
+
+We now merge `Acide.tranexamique` and `Acide.tranexamique.choc.hemorragique` as recommended by the doctors, given these are two binary variables for the attribution of the same treatment, which needs to be administered within the first 3 hours after the accident. 
+We can then delete `Acide.tranexamique.choc.hemorragique`.
+```{r}
+selectedData[selectedData[,"Acide.tranexamique"] %in% c("1") | selectedData[,"Acide.tranexamique.choc.hemorragique"] %in% c("1"), "Acide.tranexamique"] <- "1"
+
+selectedData <- selectedData[ , !(names(selectedData) %in% c("Acide.tranexamique.choc.hemorragique"))]
+```
+
+
+
+
+We also found some inconsistencies regarding the variables related to the systolic and diastolic blood pressure that we have to fix.
+We will make these assumptions:
+1) When either systolic or diastolic pressure is smaller than 15 and non-zero, doctors have entered the real pressure values multiplied by 0.1 by mistake -> so we should multiply them by 10 (this affects less than a dozen patients)
+```{r}
+selectedData[!is.na(selectedData[,"PAD.SMUR"]) & (selectedData[,"PAD.SMUR"] < 15),"PAD.SMUR"]  <- selectedData[!is.na(selectedData[,"PAD.SMUR"]) & (selectedData[,"PAD.SMUR"] < 15),"PAD.SMUR"]  * 10
+
+selectedData[!is.na(selectedData[,"PAS.SMUR"]) & selectedData[,"PAS.SMUR"] < 15,"PAS.SMUR"]  <- selectedData[!is.na(selectedData[,"PAS.SMUR"]) & selectedData[,"PAS.SMUR"] < 15,"PAS.SMUR"] * 10
+
+selectedData[!is.na(selectedData[,"PAS.min"]) & selectedData[,"PAS.min"] < 15,"PAS.min"]  <- selectedData[!is.na(selectedData[,"PAS.min"]) & selectedData[,"PAS.min"] < 15,"PAS.min"] * 10
+
+selectedData[!is.na(selectedData[,"PAD.min"]) & selectedData[,"PAD.min"] < 15,"PAD.min"]  <- selectedData[!is.na(selectedData[,"PAD.min"]) & selectedData[,"PAD.min"] < 15,"PAD.min"]  * 10
+
+selectedData[!is.na(selectedData[,"PAS"]) & selectedData[,"PAS"] < 15,"PAS"]  <- selectedData[!is.na(selectedData[,"PAS"]) & selectedData[,"PAS"] < 15,"PAS"] * 10
+
+selectedData[!is.na(selectedData[,"PAD"]) & selectedData[,"PAD"] < 15,"PAD"]  <- selectedData[!is.na(selectedData[,"PAD"]) & selectedData[,"PAD"] < 15,"PAD"] * 10
+```
+
+2) When systolic pressure is smaller than dyastolic pressure, the variables were swapped by mistake and we will swap them back.
+The number of entries that have PAS<PAD is very small, so this assumption will not change the dataset considerably.
+```{r}
+transition <- selectedData[!is.na(selectedData[,"PAS.SMUR"]) & !is.na(selectedData[,"PAD.SMUR"]) & selectedData[,"PAS.SMUR"] < selectedData[,"PAD.SMUR"],] 
+
+selectedData[!is.na(selectedData[,"PAS.SMUR"]) & !is.na(selectedData[,"PAD.SMUR"]) & (selectedData[,"PAS.SMUR"] < selectedData[,"PAD.SMUR"]),]  <- transform(selectedData[!is.na(selectedData[,"PAS.SMUR"]) & !is.na(selectedData[,"PAD.SMUR"]) & (selectedData[,"PAS.SMUR"] < selectedData[,"PAD.SMUR"]),], PAS.SMUR = transition[,"PAD.SMUR"], PAD.SMUR = transition[,"PAS.SMUR"])
+
+transition <- selectedData[!is.na(selectedData[,"PAS.min"]) & !is.na(selectedData[,"PAD.min"]) & selectedData[,"PAS.min"] < selectedData[,"PAD.min"],] 
+
+selectedData[!is.na(selectedData[,"PAS.min"]) & !is.na(selectedData[,"PAD.min"]) & selectedData[,"PAS.min"] < selectedData[,"PAD.min"],]  <- transform(selectedData[!is.na(selectedData[,"PAS.min"]) & !is.na(selectedData[,"PAD.min"]) & selectedData[,"PAS.min"] < selectedData[,"PAD.min"],], PAS.min = transition[,"PAD.min"], PAD.min = transition[,"PAS.min"])
+
+transition <- selectedData[!is.na(selectedData[,"PAS"]) & !is.na(selectedData[,"PAD"]) & selectedData[,"PAS"] < selectedData[,"PAD"],] 
+
+selectedData[!is.na(selectedData[,"PAS"]) & !is.na(selectedData[,"PAD"]) & selectedData[,"PAS"] < selectedData[,"PAD"],]  <- transform(selectedData[!is.na(selectedData[,"PAS"]) & !is.na(selectedData[,"PAD"]) & selectedData[,"PAS"] < selectedData[,"PAD"],], PAS = transition[,"PAD"], PAD = transition[,"PAS"])
+```
+
+Now, we will merge `PAS.min`, `PAD.min` and `FC.max` with `PAS.SMUR`, `PAD.SMUR` and `FC.SMUR` respectively, as the information of interest is simply pre-hospital blood pressure. This allows to reduce the number of missing values for pre-hospital blood pressure. We can then drop the `.SMUR` variables.
+
+```{r, echo = FALSE}
+#When neither of the two variables is missing, we will take the minimum/maximum of the two
+selectedData[!is.na(selectedData[,"PAS.min"]) & !is.na(selectedData[,"PAS.SMUR"]),] <- transform(selectedData[!is.na(selectedData[,"PAS.min"]) & !is.na(selectedData[,"PAS.SMUR"]),], PAS.min = pmin(PAS.min, PAS.SMUR))
+selectedData[!is.na(selectedData[,"PAD.min"]) & !is.na(selectedData[,"PAD.SMUR"]),] <- transform(selectedData[!is.na(selectedData[,"PAD.min"]) & !is.na(selectedData[,"PAD.SMUR"]),], PAD.min = pmin(PAD.min, PAD.SMUR))
+selectedData[!is.na(selectedData[,"FC.max"]) & !is.na(selectedData[,"FC.SMUR"]),] <- transform(selectedData[!is.na(selectedData[,"FC.max"]) & !is.na(selectedData[,"FC.SMUR"]),], FC.max = pmax(FC.max, FC.SMUR))
+
+#When only .min/.max is missing, we will assume it is equal to .SMUR
+selectedData[is.na(selectedData[,"PAS.min"]) & !is.na(selectedData[,"PAS.SMUR"]),] <- transform(selectedData[is.na(selectedData[,"PAS.min"]) & !is.na(selectedData[,"PAS.SMUR"]),], PAS.min = PAS.SMUR)
+selectedData[is.na(selectedData[,"PAD.min"]) & !is.na(selectedData[,"PAD.SMUR"]),] <- transform(selectedData[is.na(selectedData[,"PAD.min"]) & !is.na(selectedData[,"PAD.SMUR"]),], PAD.min =PAD.SMUR)
+selectedData[is.na(selectedData[,"FC.max"]) & !is.na(selectedData[,"FC.SMUR"]),] <- transform(selectedData[is.na(selectedData[,"FC.max"]) & !is.na(selectedData[,"FC.SMUR"]),], FC.max = FC.SMUR)
+
+#we can then delete the .SMUR variables
+delet <- c("FC.SMUR", "PAD.SMUR", "PAS.SMUR")
+selectedData <- selectedData[ , !(names(selectedData) %in% delet)]
+
+```
+
+Another identified confounder is the ratio of heart frequency (FC) and systolic arterial pressure (PAS) and the difference of this index between the first measurements and the arrival at hospital.
+```{r shock.index}
+selectedData$Shock.index.ph <- selectedData$FC.max/selectedData$PAS.min
+selectedData$Shock.index.ph[is.nan(selectedData$Shock.index.ph)] <- 0
+selectedData$Shock.index.ph[selectedData$Shock.index.ph==Inf] <- 0
+
+
+Shock.index <- selectedData$FC/selectedData$PAS 
+Shock.index[is.nan(Shock.index)] <- 0
+Shock.index[Shock.index==Inf] <- 0
+
+selectedData$Delta.shock.index <- selectedData$Shock.index.ph - Shock.index
+```
+
+
+We have a quick look at the variable `Temps.lieux.hop` that indicates the time from arrival of the SAMU at the place of the accident to the arrival at the hospital. This variable should be given in minutes, but seems to be given in hours by some practitioners. Furthermore there seem to be outliers that might be explained by patients that got retransfered from one hospital to another one. Hence the range of observed values is fairly large, even if we drop the outliers.
+```{r temps.lieux.hop}
+summary(selectedData$Temps.lieux.hop)
+
+d1 = density(selectedData[(selectedData$Trauma.cranien %in% c("1")| selectedData$AIS.tete>=2) & (!is.na(selectedData$Temps.lieux.hop)), "Temps.lieux.hop"])
+
+plot(d1, col="red", 
+     main = "Observed Temps.lieux.hop for patients with trauma cranien or AIS.tete >=2", 
+     cex.main = 0.65)
+
+hist(selectedData[(selectedData$Trauma.cranien %in% c("1")| selectedData$AIS.tete>=2) & (!is.na(selectedData$Temps.lieux.hop)), "Temps.lieux.hop"],
+     col=rgb(1,0,0,0.5),
+     main="Temps.lieux.hop", 
+     xlab="Time (in hours or minutes)",
+     breaks = 25)
+```
+
+Let's have a closer look at patients with `Temps.lieux.hop` < 20. Are 20 minutes a realistic value?
+We choose to drop the variable `Temps.lieux.hop` because of the difficulty of assessing the quantity of outliers.
+
+```{r temps.lieux.hop.2}
+hist(selectedData[(selectedData$Trauma.cranien %in% c("1")| selectedData$AIS.tete>=2) & (!is.na(selectedData$Temps.lieux.hop) & selectedData$Temps.lieux.hop < 20), "Temps.lieux.hop"],
+     col=rgb(1,0,0,0.5),
+     main=paste0("Temps.lieux.hop (total # of TBI patients with observed Temps: ", sum((selectedData$Trauma.cranien %in% c("1")| selectedData$AIS.tete>=2) & (!is.na(selectedData$Temps.lieux.hop))) ,")"),
+     xlab="Time (in hours or minutes)",
+     breaks = 25)
+
+selectedData <- selectedData[, names(selectedData) != "Temps.lieux.hop"]
+```
+
+
+### Exploring and visualizing missing values
+
+#### On entire sample
+Let's see how many missing values we have for each variable as for now:
+```{r statsNA2, message = FALSE, warning = FALSE }
+null.data <- sapply(selectedData, function(x) sum(is.na(x)))
+
+dims <- dim(selectedData)
+variable.names <- colnames(selectedData)
+missing.data <- as.data.frame(cbind(variable.names, null.data), stringsAsFactors = FALSE)
+missing.data[-1] <- apply(missing.data[-1], 1:2, function(x) as.numeric(as.character(x)))
+rownames(missing.data) <- NULL
+
+missing.data.reshaped <- melt(missing.data, id.var="variable.names")
+
+ggplot(missing.data.reshaped, aes(x = reorder(variable.names, value), y = (100 * value / dims[1]), fill = variable)) + 
+  geom_bar(stat = "identity") + theme(axis.text.x= element_text(angle=65,hjust=1, size=6)) + xlab("Variable") + ylab("Percentage") + ggtitle("Percentage of missing values") 
+```
+
+However, we must distinguish between "really missing" values and "not really missing" - some of the null entries are not "really missing" because they would have been impossible to collect:
+
+1) In the pre-hospital stage, all the patients that have been given osmotherapy (mannitol or SSH) have had mydriase - hospital guidelines. So the null entries for mannitol for patients with no mydriase can be replaced by "No mydriase":
+```{r}
+selectedData$Mannitol.SSH = factor(selectedData$Mannitol.SSH, levels=c(levels(selectedData$Mannitol.SSH), "No mydriase"))
+selectedData[selectedData$Mydriase %in% c("Non"),"Mannitol.SSH"] <- "No mydriase"
+```
+
+2) When there is no mydriase and/or no mannitol given, it is impossible to observe a value for Regression.mydriase.sous.osmotherapie. So these null entries can be replaced by "Not tested":
+```{r}
+selectedData$Regression.mydriase.sous.osmotherapie <- factor(selectedData$Regression.mydriase.sous.osmotherapie,                                            levels=c(levels(selectedData$Regression.mydriase.sous.osmotherapie), "Not tested"))
+
+selectedData[selectedData$Mydriase %in% c("Non"),"Regression.mydriase.sous.osmotherapie"] <- "Not tested"
+selectedData[selectedData$Mannitol.SSH %in% c("Rien"),"Regression.mydriase.sous.osmotherapie"] <- "Not tested"
+```
+
+3) If the patient survives, the missing entries in `Cause.du.DC` should be "Survived":
+```{r}
+selectedData$Cause.du.DC = factor(selectedData$Cause.du.DC, levels=c(levels(selectedData$Cause.du.DC), "Survived"))
+selectedData[selectedData$DC.en.rea %in% c("0"),"Cause.du.DC"] <- "Survived" 
+```
+
+We also make these assumptions:
+
+4) When there are missing values for any of these procedures done in the hospital, they are assumed not to have been done (as per the doctors' recommendation): `Catecholamines`, `KTV.poses.avant.TDM`, `Dose.NAD.depart`, `Osmotherapie`, `PIC`, `DVE`,  `Hypothermie.therapeutique`, `Craniectomie.decompressive`, `Acide.tranexamique`, `Bloc.J0.neurochirurgie`. Adding also `Remplissage.total.cristalloides` and `Remplissage.total.colloides`.
+```{r}
+recode_NoTrauma <- function(f, feature_name){
+  if (feature_name %in% colnames(f)){
+    if (feature_name == "Osmotherapie"){
+        f[is.na(f[,feature_name]),feature_name] <- "Rien"
+        return(f)
+    }
+    else{
+        f[is.na(f[,feature_name]),feature_name] <- 0
+    return(f)
+    }
+  }
+  return(f)
+}
+
+features_to_recode_3 <- c("Catecholamines", "KTV.poses.avant.TDM", "Dose.NAD.depart", "Osmotherapie", "PIC", "DVE", "Hypothermie.therapeutique", "Craniectomie.decompressive", "Acide.tranexamique", "Bloc.J0.neurochirurgie","Remplissage.total.cristalloides","Remplissage.total.colloides")
+
+for (i in features_to_recode_3){
+  selectedData <- recode_NoTrauma(selectedData, i)
+}
+```
+Why can't we do the same for `DTC.IP.max`? Because, even though the "NA" entries probably mean these values were not measured/monitorized, there was still a real actual value inerent to the patient for these variables that we can't access and might have impacted their health. 
+
+5) If patient does not survive, the missing entries in `Glasgow.sortie` should be "Deceased"; however, to avoid factorizing this variable, we will attribute the value 3 (the minimum).
+
+__This is a choice we make to deal with variables that are in $\mathbb{R}\times NA$ buy that are in fact mixed variables of quantitative and categorical values. Other choices of dealing with this problem need to be investigated.__
+
+```{r}
+selectedData[selectedData$DC.en.rea %in% c("1"),"Glasgow.sortie"] <- 3
+``` 
+
+
+These changes have a sizable impact on the number of missing data entries:
+```{r, message = FALSE, warning = FALSE, echo = FALSE }
+
+null.data <- sapply(selectedData, function(x) sum(is.na(x)))
+
+dims<- dim(selectedData)
+variable.names <- colnames(selectedData)
+missing.data <- as.data.frame(cbind(variable.names, null.data), stringsAsFactors = FALSE)
+missing.data[-1] <- apply(missing.data[-1], 1:2, function(x) as.numeric(as.character(x)))
+rownames(missing.data) <- NULL
+
+missing.data.reshaped <- melt(missing.data, id.var="variable.names")
+
+ggplot(missing.data.reshaped, aes(x = reorder(variable.names, value), y = (100 * value / dims[1]), fill = variable)) + 
+  geom_bar(stat = "identity") + theme(axis.text.x= element_text(angle=65,hjust=1, size=6)) + xlab("Variable") + ylab("Percentage") + 
+  ggtitle("Percentage of missing values") 
+```
+
+We will not keep the variable `Lactates.prehosp`, given it has more than 75% of missing values.
+```{r}
+delet = c("Lactates.prehosp")
+selectedData= selectedData[ , !(names(selectedData) %in% delet)]
+```
+
+#### On target group of TBI patients
+Our causal inference analysis will only focus on the patients that have had a lesion visible on the CT scan (tranlated into Trauma.cranien == 1) and/or an AIS.tete score equal or higher than 2, given that the aim of our study is to analyse the (causal) effect of the administration of tranexamic acid in patients that have a brain injury. We should examine the missing values (pattern) specifically on this subset of patients and impose a lower threshold for the % of missing values allowed for each variable.
+
+For the patients we will choose to run causal inference (`Trauma.cranien == 1` and/or `AIS.tete => 2`), let's see how many __pre-treatment variables__ are missing:
+
+```{r }
+pretreatment <- c("Traitement.anticoagulant", "Traitement.antiagregants",
+                  "Glasgow.initial", "Glasgow.moteur.initial",
+                  "Hemocue.init", "Delta.hemocue", "Shock.index.ph", "Delta.shock.index",
+                  "Mydriase","Regression.mydriase.sous.osmotherapie", 
+                  "ACR.1", "PAS.min", "PAD.min", "FC.max", 
+                  "SpO2.min", "IOT.SMUR", 
+                  "Temps.lieux.hop", 
+                  "Anomalie.pupillaire", 
+                  "FC", "PAS", "PAD", 
+                  "SpO2", "Lactates", "pCO2", "PaO2", "Ventilation.FiO2", 
+                  "Hb", "Plaquettes", "TP.pourcentage", "Fibrinogene.1",
+                  "Alcool",
+                  "Choc.hemorragique", 
+                  "Trauma.cranien", 
+                  "AIS.tete", "AIS.face", "AIS.thorax",	"AIS.abdo.pelvien", "AIS.membres.bassin",	"AIS.externe",
+                  "Remplissage.total.cristalloides","Remplissage.total.colloides")
+
+pretreatment <- intersect(pretreatment, colnames(selectedData))
+
+missing.in.pretreatment <- vector(mode = "numeric", length = length(pretreatment))
+
+for (i in 1:length(pretreatment)){
+  missing.in.pretreatment[i] <- length(selectedData[((selectedData$Trauma.cranien %in% c("1")) |(selectedData$AIS.tete >= 2)) & is.na(selectedData[,pretreatment[i]]),colnames(selectedData) %in% pretreatment[i]])/length((selectedData[(selectedData$Trauma.cranien %in% c("1"))|(selectedData$AIS.tete >= 2),colnames(selectedData) %in% pretreatment[i]]))
+}
+
+a <- barplot(missing.in.pretreatment*100, cex.names = 0.5, names.arg="",ylab = "Percentage of missing values", main = "% of missing values for treatment variables in patients w/ trauma cranien or AIS.tete >= 2", las = 2, cex.main = 0.8, cex.lab = 0.8)
+text(a[,1], -3.7, srt = 60, adj= 1, xpd = TRUE, labels = pretreatment, cex=0.4)
+```
+
+None of these variables seem to be missing enough to justify their elimination, especially considering that the doctors have selected the ones that are missing the most as important cofounders: Alcool, Lactates, pCO2, paO2 and temps.lieux.hop. 
+
+In fact, we highlight how Alcool does seem to be an important confounder by computing it's distribution by treated and not treated patients. Patients that were treated show higher values of alcool in their blood:
+
+```{r }
+if ("Alcool" %in% colnames(selectedData)){
+alc.treated <- selectedData[selectedData[,"Acide.tranexamique"] %in% c("1") & !(is.na(selectedData[,"Alcool"])), "Alcool"]
+alc.control <- selectedData[selectedData[,"Acide.tranexamique"]%in% c("0") & !(is.na(selectedData[,"Alcool"])), "Alcool"]
+
+hist(alc.treated, col=rgb(1,0,0,0.5),
+     xlim=c(0,4), probability = T,
+     main="Alcool values", 
+     xlab="Level of alcool",
+     breaks = 25)
+
+hist(alc.control, 
+     xlim = c(0,4), probability = T,
+     col=rgb(0,0,1,0.5),
+     breaks = 25, 
+     add=T)
+
+legend("topright", c("Not treated", "Treated"), lty = c(1,1), col = c("blue","red"))
+
+
+# d1 <- density(selectedData[selectedData[,"Acide.tranexamique"] %in% c("1") & !(is.na(selectedData[,"Alcool"])), "Alcool"], from = 0, to = 3)
+# d2 <- density(selectedData[selectedData[,"Acide.tranexamique"]%in% c("0") & !(is.na(selectedData[,"Alcool"])), "Alcool"], from = 0, to = 3)
+#      
+# plot(d1, col="red", main = "Alcool values", cex.main = 0.9, ylim = c(0,4.5))
+# lines(d2, col="blue")
+# legend("topright", c("Not treated", "Treated"), lty = c(1,1), col = c("blue","red"))
+}
+```
+
+
+Now, for the patients we will use to run causal inference (`Trauma cranien == 1` and/or `AIS.tete => 2`), let's see how many __treatment variables__ are missing:
+```{r }
+treatments <- c("Mannitol.SSH", 
+                "DTC.IP.max", 
+                "Catecholamines", 
+                "KTV.poses.avant.TDM", 
+                "Dose.NAD.depart", 
+                "Osmotherapie", 
+                "PIC", 
+                "DVE", "Hypothermie.therapeutique", "Craniectomie.decompressive",
+                "Acide.tranexamique",
+                "Bloc.J0.neurochirurgie","Remplissage.total.cristalloides","Remplissage.total.colloides") 
+
+treatments <- intersect(treatments, colnames(selectedData))
+
+missing.in.treatment <- vector(mode = "numeric", length = length(treatments))
+
+for (i in 1:length(treatments)){
+  missing.in.treatment[i] <- length(selectedData[((selectedData$Trauma.cranien %in% c("1")) |(selectedData$AIS.tete >= 2)) & is.na(selectedData[,treatments[i]]),colnames(selectedData) %in% treatments[i]])/length((selectedData[(selectedData$Trauma.cranien %in% c("1"))| (selectedData$AIS.tete >= 2),colnames(selectedData) %in% treatments[i]]))
+}
+
+a <- barplot(missing.in.treatment*100, cex.names = 0.5, names.arg="",ylab = "Percentage of missing values", main = "% of missing values for treatment variables in patients w/ trauma cranien or AIS.tete >= 2", las = 2, cex.main = 0.8, cex.lab = 0.8, ylim = c(0,50))
+text(a[,1], -3.7, srt = 30, adj= 1, xpd = TRUE, labels = treatments, cex=0.5)
+
+```
+
+The variables `Catecholamines`, `KTV.poses.avant.TDM`, `Dose.NAD.depart`, `Osmotherapie`, `PIC`, `DVE`, `Hypothermie.therapeutique`, `Craniectomie.decompressive` and `Acide.tranexamique` do not have any missing values at this point given our previous assumptions. 
+
+`DTC.IP.max` has a concerning number of missing entries, especially considering it's potential impact on the results of the causal inference analysis - however the doctors considered it as a very important variable so we shall not delete it. Let's look out for how its distribution changes after the imputation of missing data.
+
+```{r dtc_per_center}
+df <- selectedData %>%
+        filter((Trauma.cranien %in% c("1")) | (AIS.tete >= 2)) %>%
+        dplyr::select(c("DTC.IP.max","Trauma.Center")) %>%
+        mutate(is.missing = is.na(DTC.IP.max)) %>%
+        group_by(Trauma.Center) %>%
+        summarise(missing.DTC = mean(is.missing), n = n()) %>%
+        mutate(effectifs = paste(n, "TBI \n patients"))
+        
+
+ggplot(df, aes(x = Trauma.Center)) +
+  geom_col(aes( y = missing.DTC*100, fill=n)) +
+  geom_text(aes(y = missing.DTC*100, label = effectifs), fontface = "bold", vjust = 1.4, color = "black", size = 4) +
+  ylab("% missing DTC.IP.max") + 
+  xlab("Trauma Center") +
+  labs(fill = "Number of\nTBI patients") +
+  theme(axis.text.x= element_text(angle=65,hjust=1, size=12))
+```
+
+
+Regarding `Mannitol.SSH`, only 1% of the patients with Trauma Cranien or AIS.tete >= 2 have a missing entry for this variable. Therefore if the entries are missing completely at random one could choose to remove them. 
+Given the large number of variables it is almost impossible to test the missing (completely) at random hypothesis.
+However to get a first impression, let's compare the mortality rate of the patients that have a missing entry for `Mannitol.SHH` with the mortality rate of the patients that do not:
+```{r }
+missingtreatment <- selectedData[is.na(selectedData[,"Mannitol.SSH"]),]
+
+missingtreat.DC.en.rea <- c(length(missingtreatment[missingtreatment$DC.en.rea==1, "DC.en.rea"])/length(missingtreatment[,1]),length(selectedData[selectedData$DC.en.rea==1 & (selectedData$Trauma.cranien == 1 | selectedData$AIS.tete >= 2), "DC.en.rea"])/length(selectedData[(selectedData$Trauma.cranien == 1 | selectedData$AIS.tete >= 2), "DC.en.rea"]))
+
+names.plot <- c("Selected patients w/ => 1 missing entry","Selected patients w/ no missing entries")
+
+a <- barplot(missingtreat.DC.en.rea*100, cex.names = 0.5, names.arg="", ylab = "Percentage of deceased patients", main = "% of deceased patients, split by having or not having a missing entry for Mannitol.SSH", cex.main = 0.8, cex.lab = 0.8, cex = 1,  ylim=c(0,60))
+text(a[,1], -3, srt = 0, adj= 0.5, xpd = TRUE, labels = names.plot, cex=0.8)
+```
+
+The propensity to decease does not seem to considerably explain the missingness of `Mannitol.SSH` as the % of patients with a missing entry that have deceased is very similar to the % of patients with no missing data that have deceased.
+We could delete these patients who have a missing entry for `Mannitol.SSH` but it is not clear whether this is a good choice. Indeed this would a choice among others and it might be that looking only at the mortality rates to test the MCAR hypothesis is not pertinent. This might have an influence on the causal inference since we might overlook some interaction of the missingness pattern of the treatments `Mannitol.SSH` and `Acide.tranexamique`.
+
+
+
+
+
+Finally, for the patients we will use to run causal inference (`Trauma cranien == 1` and/or `AIS.tete => 2`), let's see how many __outcome variables__ are missing:
+```{r }
+outcome <- c("DC.en.rea","Cause.du.DC","Glasgow.sortie")
+  
+missing.in.outcome <- vector(mode = "numeric", length = length(outcome))
+
+for (i in 1:length(outcome)){
+  missing.in.outcome[i] <- length(selectedData[((selectedData$Trauma.cranien %in% c("1")) | selectedData$AIS.tete >= 2) & is.na(selectedData[,outcome[i]]),colnames(selectedData) %in% outcome[i]])/length((selectedData[selectedData$Trauma.cranien %in% c("1") | selectedData$AIS.tete >= 2,colnames(selectedData) %in% outcome[i]]))
+}
+
+a <- barplot(missing.in.outcome*100, cex.names = 0.5, names.arg="",ylab = "Percentage of missing values", main = "% of missing values for outcome variables in patients with trauma cranien or AIS.tete >=2", las = 2, cex.main = 0.8, cex.lab = 0.8, ylim=c(0,100))
+text(a[,1], -3.7, srt = 0, adj= 0.5, xpd = TRUE, labels = outcome, cex=0.8)
+
+```
+
+We could wonder if `Glasgow.sortie`, the outcome variable that is missing the most, is missing completely at random. Let's compare with a good proxy for severity of the injuries - `ISS.2`, the higher the more severily injured the patient is:
+```{r }
+d1 = density(selectedData[(selectedData$Trauma.cranien %in% c("1")|selectedData$AIS.tete>=2)& is.na(selectedData[,"Glasgow.sortie"]), "ISS.2"])
+d2 = density(selectedData[(selectedData$Trauma.cranien %in% c("1")|selectedData$AIS.tete>=2) & !(is.na(selectedData[,"Glasgow.sortie"])), "ISS.2"])
+     
+plot(d1, col="red", 
+     main = "ISS.2 for patients with trauma cranien or AIS.tete >=2, according to having a missing entry  for Glasgow.sortie", 
+     cex.main = 0.65, 
+     ylim = c(0,0.040))
+
+lines(d2, col="blue")
+legend("topright", c("Glasgow.sortie not missing", "Glasgow.sortie missing"), 
+       lty = c(1,1), col = c("blue","red"))
+  
+```
+
+`Glasgow.sortie` does not seem to be MCAR - there is a clear increase in the frequency of the lower values of `ISS.2` for patients with `Glasgow.sortie` missing. This means that less severily injured patients are more likely to have a missing entry for `Glasgow.sortie` - which seems to make sense, once we can imagine that doctors are less likely to take note of the `Glasgow.sortie` level for patients that leave the hospital doing quite well. 
+
+We will not delete this outcome variable given we want to experiment running causal inference on it, nor will we delete the patients that have a missing entry for this variable given the failure of the missing completely at random hypothesis - but we will be extra careful when using this variable in our casual inference, given the high percentage of missing entries and subsequently the high percentage of imputed values.
+
+However, we should not allow for any missing entries (and subsequent imputation) on the most important outcome variable for our analysis: `DC.en.rea`. So we should attempt at deleting patients with missing entries in this variable, that are around 3% of the population.
+
+It turns out that most of these patients that have a missing entry for `DC.en.rea` also have a missing entry for `Cause.du.DC`:
+
+```{r }
+outcome <- c("DC.en.rea", "Cause.du.DC")
+missing.counts <- 0
+rownum <- 0
+rownum2 <- 0
+
+for (i in 1:length(selectedData[,1])){
+  if  (selectedData[i, "Trauma.cranien"] == 1 | selectedData[i, "AIS.tete"] >= 2){
+      full <- selectedData[i, names(selectedData) %in% outcome]
+      missing.counts <- rbind(missing.counts, length(full[is.na(full) == TRUE]))
+      
+      if (length(full[is.na(full) == TRUE])!=0){
+        rownum <- rbind(rownum,i)
+      } else{
+        rownum2 <- rbind(rownum2,i)
+      }
+  }
+}
+
+
+names.missing <- c("Missing entry for 1 of these", "Missing entry for both", "Total")
+
+missingentries <- table(missing.counts)[2:3]/length(missing.counts)
+missingentries[3] <- sum(missingentries)
+  
+a <- barplot(as.vector(missingentries)*100, cex.names = 0.5, names.arg="", 
+             ylab = "Percentage of patients", 
+             main = "% of patients w/ trauma cranien or AIS.tete >= 2 that have missing entries for DC.en.rea or Cause.du.DC", 
+             las = 2, cex.main = 0.8, cex.lab = 0.8, ylim=c(0,4))
+text(a[,1], -0.3, srt = 0, adj= 0.5, xpd = TRUE, labels = names.missing, cex=0.8)
+```
+
+Are these missing completely at random, which would allow us to delete these patients without further complications? Let's compare with a good proxy for severity of the injuries - `ISS.2`:
+```{r }
+d1 = density(selectedData[rownum, "ISS.2"])
+d2 = density(selectedData[rownum2, "ISS.2"])
+
+plot(d1, col="red", 
+     main = "ISS.2 for patients with trauma cranien or AIS.tete >=2, according to having at least one missing entry for outcome variables other than Glasgow.sortie", 
+     cex.main = 0.65, ylim = c(0,0.040))
+
+lines(d2, col="blue")
+legend("topright",
+       c("No missing entries", "At least one missing entry"), 
+       lty = c(1,1), col = c("blue","red"))
+  
+```
+
+The distribution of `ISS.2` is quite similar between patients with trauma cranien or AIS.tete >= 2 that have no missing entry for `DC.en.rea` and `Cause.du.DC` and the patients with trauma cranien or AIS.tete >= 2 that have at least one missing entry for one of these variables. This suggests an approximate MCAR, which allows us to delete the patients that have a missing entry for this variable:
+```{r}
+selectedData = selectedData[-rownum, ] 
+```
+
+We won't need the variable `ISS.2` anymore (as it is an average of all the AIS variables that we are keeping), so we will delete it:
+```{r}
+delet = c("ISS.2")
+selectedData= selectedData[ , !(names(selectedData) %in% delet)]
+```
+
+
+Let's have a final look at the percentage of missing values for the variables we are keeping and the patients we will run causal inference on before running imputation:
+```{r, message = FALSE, warning = FALSE, echo = FALSE }
+
+null.data <- sapply(selectedData[((selectedData$Trauma.cranien %in% c("1")) | selectedData$AIS.tete >= 2),], function(x) sum(is.na(x)))
+
+dims<- dim(selectedData[((selectedData$Trauma.cranien %in% c("1")) | selectedData$AIS.tete >= 2),])
+variable.names <- colnames(selectedData)
+missing.data <- as.data.frame(cbind(variable.names, null.data), stringsAsFactors = FALSE)
+missing.data[-1] <- apply(missing.data[-1], 1:2, function(x) as.numeric(as.character(x)))
+rownames(missing.data) <- NULL
+
+missing.data.reshaped <- melt(missing.data, id.var="variable.names")
+
+ggplot(missing.data.reshaped, aes(x = reorder(variable.names, value), y = (100 * value / dims[1]), fill = variable)) + 
+  geom_bar(stat = "identity") + theme(axis.text.x= element_text(angle=65,hjust=1, size=6), plot.title = element_text(size=10)) + xlab("Variable") + ylab("Percentage") + 
+  ggtitle("Percentage of missing values for patients w/ Trauma cranien or AIS.tete >=2") 
+
+```
+
+
+### Recode the outcome variable
+
+At first we chose to recode the outcome variable `DC.en.rea` and replace it by the new defined variable `DC.Trauma`: since we are only interested in TBI patients and the effect of the treatment on their mortality we will only consider the deaths caused by LATA (i.e. withdrawal of care), brain death, head injury and multiple organ failure. Patients who died of other causes (sepsis or hemorrhagic choc) will be deleted. 
+
+**After discussions however, we modified the definition of `DC.Trauma` such that we consider all deaths, without differentiation between the causes.**
+
+We will also remove the Trauma Center (which we used in the previous exploratory part).
+
+Extract subgroup of TBI patients (this is possible before imputation since Trauma.cranien and AIS.tete do not have any missing values)
+
+```{r recode_dc}
+data_indAll <- selectedData %>%
+                    mutate(DC.Trauma = DC.en.rea==1) %>% # & Cause.du.DC %in% c("LATA",
+                                                                          # "Défaillance multi-viscérale",
+                                                                          # "Mort encéphalique",
+                                                                          # "Trauma cranien",
+                                                                          # "Mort enc_phalique",
+                                                                          # "Trauma cranien",
+                                                                          # "D_faillance multi-visc_rale")) %>%
+                    filter(!(DC.en.rea==1 & DC.Trauma==0)) %>%
+                    dplyr::select(-c("DC.en.rea", "Cause.du.DC"))
+
+data_indAll$DC.Trauma <- as.factor(as.integer(data_indAll$DC.Trauma))
+
+data_indTBI <- data_indAll %>%
+                  filter(Trauma.cranien==1 | AIS.tete >= 2)
+```
+
+# Save the data
+```{r save_data_for_ate}
+write.csv(data_indAll, file="~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/Data/2019-07-31_data_preprocessed_all_individuals.csv")
+write.csv(data_indTBI, file="~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/Data/2019-07-31_data_preprocessed_tbi_individuals.csv")
+```
+
+# Appendix: Plot missingness patterns
+```{r plot_NAs_before_preprocessing}
+mis.ind <- matrix("o",nrow=nrow(selectedData),ncol=ncol(selectedData))
+mis.ind[is.na(selectedData)] <- "m"
+dimnames(mis.ind) <- dimnames(selectedData)
+library(FactoMineR)
+resMCA <- MCA(mis.ind)
+plot.resMCA <- plot.MCA(resMCA)
+
+pdf("~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/2019-07-31_mca_ind_before.pdf") 
+plot(resMCA,invisible=c("var","quali.sup","quanti.sup"),cex=0.7)
+dev.off()
+
+pdf("~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/2019-07-31_mca_var_before.pdf")
+plot(resMCA,invisible=c("ind","quali.sup","quanti.sup"),
+     selectMod = "contrib 10",
+     select = "contrib 3", #c("Mannitol.SSH_m","IOT.SMUR_m", "Regression.mydriase.sous.osmotherapie_m", "Mydriase_m", "ACR.1_m", "Glasgow.initial_m", "PAS_m", "PAD_m", "FC_m", "SpO2_m", "Delta.shock.index_m", "Shock.index.ph_m"),
+     unselect = 0.7,
+     autoLab = "yes",
+     cex=0.9)
+dev.off()
+
+pdf("~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/2019-07-31_mca_mixed_before.pdf")
+plot(resMCA,invisible=c("quali.sup","quanti.sup"),cex=0.8)
+dev.off()
+
+library(naniar)
+ggplot(selectedData, 
+        aes(x = Shock.index.ph, 
+            y = Delta.hemocue)) + 
+     geom_miss_point() + 
+     theme_dark() + 
+     theme(axis.text=element_text(size=15),
+           axis.title=element_text(size=15,face="bold"),
+           legend.text = element_text(size=15,face="bold"),
+           legend.title = element_blank())
+
+ggsave("~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/2019-07-31_shock_hemocue_before.pdf", plot = last_plot())
+```
+
+```{r plot_NAs_after_preprocessing}
+mis.ind <- matrix("o",nrow=nrow(data_indAll),ncol=ncol(data_indAll))
+mis.ind[is.na(data_indAll)] <- "m"
+dimnames(mis.ind) <- dimnames(data_indAll)
+library(FactoMineR)
+resMCA <- MCA(mis.ind)
+
+pdf("~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/2019-07-31_mca_ind_after.pdf") 
+plot(resMCA,invisible=c("var","quali.sup","quanti.sup"),  cex=0.7)
+dev.off()
+
+pdf("~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/2019-07-31_mca_var_after.pdf")
+plot(resMCA,invisible=c("ind","quali.sup","quanti.sup"),
+     selectMod = "contrib 9",
+     select = "contrib 2", #c("Mannitol.SSH_m","IOT.SMUR_m", "Regression.mydriase.sous.osmotherapie_m", "Mydriase_m", "ACR.1_m", "Glasgow.initial_m", "PAS_m", "PAD_m", "FC_m", "SpO2_m", "Delta.shock.index_m", "Shock.index.ph_m"),
+     unselect = 0.7,
+     autoLab = "yes",
+     cex=0.9)
+dev.off()
+
+pdf("~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/2019-07-31_mca_mixed_after.pdf")
+plot(resMCA,invisible=c("quali.sup","quanti.sup"),cex=0.8)
+dev.off()
+
+library(naniar)
+ggplot(data_indAll, 
+        aes(x = Shock.index.ph, 
+            y = Delta.hemocue)) + 
+     geom_miss_point() + 
+     theme_dark() +
+     theme(axis.text=element_text(size=15),
+           axis.title=element_text(size=15,face="bold"),
+           legend.text = element_text(size=15,face="bold"),
+           legend.title = element_blank())
+
+ggsave("~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/2019-07-31_shock_hemocue_after.pdf", plot = last_plot())
+
+
+```
