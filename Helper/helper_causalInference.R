@@ -143,7 +143,6 @@ ipw <- function(X, outcome, treat,
   # Add response mask
   if (!is.null(mask)){
     colname <- colnames(X)
-    print(colname)
     X <- cbind(X, mask)
     length.mask <- dim(mask)[2]
     if (length.mask>0){
@@ -208,14 +207,14 @@ ipw <- function(X, outcome, treat,
   # Compute normalized version of IPW
   ipw2 <- 1/sum(fitted$weight[which(treat==1)]) * sum(outcome[which(treat==1)] * fitted$weight[which(treat==1)]) - 1/sum(fitted$weight[which(!(treat==1))]) * sum(outcome[which(!(treat==1))] * fitted$weight[which(!(treat==1))])
   
-  if (ps.method == "glm"){
+  #if (ps.method == "glm"){
     mod <- lm(outcome~treat, weights = fitted$weight)
     se.ipw2 <- sqrt(diag(sandwich::vcovHC(mod, type = "HC")))[2]
-  } else {
-    se.ipw2 <- mean((outcome[which(treat==1)] - 1/sum(fitted$weight[which(treat==1)]) * sum(outcome[which(treat==1)] * fitted$weight[which(treat==1)]))^2 * fitted$weight[which(treat==1)] 
-                      +(outcome[which(treat==0)] - 1/sum(fitted$weight[which(!(treat==1))]) * sum(outcome[which(!(treat==1))] * fitted$weight[which(!(treat==1))]))^2 * fitted$weight[which(treat==0)])
-  
-  }
+  #} else {
+    #se.ipw2 <- mean((outcome[which(treat==1)] - 1/sum(fitted$weight[which(treat==1)]) * sum(outcome[which(treat==1)] * fitted$weight[which(treat==1)]))^2 * fitted$weight[which(treat==1)] 
+    #                  +(outcome[which(treat==0)] - 1/sum(fitted$weight[which(!(treat==1))]) * sum(outcome[which(!(treat==1))] * fitted$weight[which(!(treat==1))]))^2 * fitted$weight[which(treat==0)])
+    
+  #}
   return(cbind(ipw1 = ipw1,
                ipw2 = ipw2,
                se.ipw2 = se.ipw2))
