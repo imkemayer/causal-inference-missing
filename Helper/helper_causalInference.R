@@ -399,8 +399,15 @@ dr <- function(X,
 
   # Use grf's average_treatment_effect function
   if (ps.method == "grf.ate" & out.method == "grf.ate") {  
-    X.m <- model.matrix(~. , data=X2)
-    tau.forest = causal_forest(X.m, outcome, treat)
+    y.hat <- NULL
+    if (!is.null(X.for.outcome)) {
+      X.m = model.matrix(~. , data=X2)
+      forest.Y = regression_forest(X.m, outcome, tune.parameters = TRUE)
+      y.hat = predict(forest.Y, X.m)$predictions
+    }
+    
+    X.m <- model.matrix(~. , data=X1) # X1 corresponds to confounders
+    tau.forest = causal_forest(X.m, outcome, treat, Y.hat = y.hat)
   
     treatment_effect_dr <- average_treatment_effect(tau.forest, target.sample = target)
     
