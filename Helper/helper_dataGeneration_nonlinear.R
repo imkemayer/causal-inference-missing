@@ -50,10 +50,14 @@ gen_treat_lat <- function(x, class.interaction = FALSE, link = "nonlinear"){
   else if (link == "nonlinear3"){
     f.x <- 0
     for (j in 1:length(x)){
-      f.x <- f.x + (mod(j,5)==1)*(10*((x[j]<quantile(x[j],0.7)) + (x[j]> quantile(x[j],0.2)))) +
-	                (mod(j,5)==2)*(5*exp(0.2*x[j])*x[1]) +
-        					(mod(j,5)==3)*(8*(x[j]*(x[1]>0))) +
-	                ((mod(j,5)==4)*(-2.5*sqrt(abs(x[j]))))
+      # f.x <- f.x + (mod(j,5)==1)*(10*((x[j]<quantile(x[j],0.7)) + (x[j]> quantile(x[j],0.2)))) +
+	    #             (mod(j,5)==2)*(5*exp(0.2*x[j])*x[1]) +
+      #   					(mod(j,5)==3)*(8*(x[j]*(x[1]>0))) +
+	    #             ((mod(j,5)==4)*(-2.5*sqrt(abs(x[j]))))
+      f.x <- f.x + (mod(j,5)==1)*((x[j]<quantile(x[j],0.7)) + (x[j]> quantile(x[j],0.2))) +
+                   (mod(j,5)==2)*(1/(0.001+exp(x[j]*x[1]))) +
+                   (mod(j,5)==3)*(-(x[j])*(x[2]>0)) +
+                   (mod(j,5)==4)*(-2.5*sqrt(abs(x[j])))
       if (mod(j,5)==0) f.x <- f.x + (x[j-2]*x[j])
     }
     offsets <- c(0.5, -2, seq(-100, 100, length.out = 50))
@@ -134,10 +138,14 @@ gen_treat_svd <- function(x, class.interaction = FALSE, link = "nonlinear"){
   else if (link == "nonlinear3"){
     f.x <- 0
     for (j in 1:length(x)){
-      f.x <- f.x + (mod(j,5)==1)*(10*((x[j]<quantile(x[j],0.7)) + (x[j]> quantile(x[j],0.2)))) +
-	                (mod(j,5)==2)*(5*exp(0.2*x[j])*x[1]) +
-        					(mod(j,5)==3)*(8*(x[j]*(x[1]>0))) +
-	                ((mod(j,5)==4)*(-2.5*sqrt(abs(x[j]))))
+      # f.x <- f.x + (mod(j,5)==1)*(10*((x[j]<quantile(x[j],0.7)) + (x[j]> quantile(x[j],0.2)))) +
+	    #             (mod(j,5)==2)*(5*exp(0.2*x[j])*x[1]) +
+      #   					(mod(j,5)==3)*(8*(x[j]*(x[1]>0))) +
+	    #             ((mod(j,5)==4)*(-2.5*sqrt(abs(x[j]))))
+      f.x <- f.x + (mod(j,5)==1)*((x[j]<quantile(x[j],0.7)) + (x[j]> quantile(x[j],0.2))) +
+                   (mod(j,5)==2)*(1/(0.001+exp(x[j]*x[1]))) +
+                   (mod(j,5)==3)*(-(x[j])*(x[2]>0)) +
+                   (mod(j,5)==4)*(-2.5*sqrt(abs(x[j])))
       if (mod(j,5)==0) f.x <- f.x + (x[j-2]*x[j])
     }
   } else if (link == "linear") {
@@ -189,14 +197,21 @@ gen_treat_deep <- function(x, link = "nonlinear"){
   else if (link == "nonlinear3"){
     f.x <- 0
     for (j in 1:length(x)){
-      f.x <- f.x + (mod(j,5)==1)*(10*((x[j]<quantile(x[j],0.7)) + (x[j]> quantile(x[j],0.2)))) +
-	                (mod(j,5)==2)*(5*exp(0.2*x[j])*x[1]) +
-        					(mod(j,5)==3)*(8*(x[j]*(x[1]>0))) +
-	                ((mod(j,5)==4)*(-2.5*sqrt(abs(x[j]))))
+      # f.x <- f.x + (mod(j,5)==1)*(10*((x[j]<quantile(x[j],0.7)) + (x[j]> quantile(x[j],0.2)))) +
+	    #             (mod(j,5)==2)*(5*exp(0.2*x[j])*x[1]) +
+      #   					(mod(j,5)==3)*(8*(x[j]*(x[1]>0))) +
+	    #             ((mod(j,5)==4)*(-2.5*sqrt(abs(x[j]))))
+      f.x <- f.x + (mod(j,5)==1)*((x[j]<quantile(x[j],0.7)) + (x[j]> quantile(x[j],0.2))) +
+                   (mod(j,5)==2)*(1/(0.001+exp(x[j]*x[1]))) +
+                   (mod(j,5)==3)*(-(x[j])*(x[2]>0)) +
+                   (mod(j,5)==4)*(-2.5*sqrt(abs(x[j])))
       if (mod(j,5)==0) f.x <- f.x + (x[j-2]*x[j])
     }
   }
-  else {
+  else if (link == "linear0") {
+    beta <- array(c(0.3, -0.3, -0.3, 0.3, -0.3, 0.3), dim = length(x))
+    f.x <- as.numeric(sum(x*beta))
+  } else {
     beta <- array(c(0.15, -0.5, -0.1, 1, -0.53, 2), dim = length(x))
     f.x <- as.numeric(sum(x*beta))
   }
@@ -357,7 +372,7 @@ gen_out_deep <- function(x.w.c, sd=0.1, link = "nonlinear"){
     w <- x.w.c[length(x.w.c)]
     eps <- rnorm(n = 1, sd = sd, mean = 0)
     beta <- array(c(-0.2, 0.154, 0.5, -1.95), dim = length(x))
-    y <- as.numeric(exp(0.5 + sum(x*beta)) + w) + eps
+    y <- as.numeric(sin(0.5 + sum(x*beta)) + w) + eps
     
   } 
   else {
@@ -469,10 +484,15 @@ gen_latentclass <- function(n, p, nb.class=3, mus = NULL, Sigmas = NULL, class.i
   
   if (link == "nonlinear3"){
   	for (j in 1:dim(X.tmp)[2]){
-	    X.tmp[,j] <-(mod(j,5)==1)*(((X.tmp[,j]<quantile(X.tmp[,j],0.7)) + (X.tmp[,j]> quantile(X.tmp[,j],0.2)))) +
-        					(mod(j,5)==2)*(1/(0.001+exp(X.tmp[,j]*x[1]))) +
-        					(mod(j,5)==3)*(-(X.tmp[,j])*(X.tmp[,2]>0)) +
-        					(mod(j,5)==4)*(-2.5*sqrt(abs(X.tmp[,j])))
+	    # X.tmp[,j] <-(mod(j,5)==1)*(10*((X.tmp[,j]<quantile(X.tmp[,j],0.7)) + (X.tmp[,j]> quantile(X.tmp[,j],0.2)))) +
+      #             (mod(j,5)==2)*(5*exp(X.tmp[,j]*x[1])) +
+      #             (mod(j,5)==3)*(8*(X.tmp[,j])*(X.tmp[,1]>0)) +
+      #             (mod(j,5)==4)*(-2.5*sqrt(abs(X.tmp[,j])))
+      X.tmp[,j] <- (mod(j,5)==1)*((X.tmp[,j]<quantile(X.tmp[,j],0.7)) + (X.tmp[,j]> quantile(X.tmp[,j],0.2))) +
+                   (mod(j,5)==2)*(1/(0.001+exp(X.tmp[,j]*X.tmp[,1]))) +
+                   (mod(j,5)==3)*(-(X.tmp[,j])*(X.tmp[,2]>0)) +
+                   (mod(j,5)==4)*(-2.5*sqrt(abs(X.tmp[,j]))) +
+                   (mod(j,5)==0)*(X.tmp[,j-2]*X.tmp[,j])
 		} 
   }
   if (cio){
@@ -598,10 +618,15 @@ gen_multisvd <- function(n, p, ngr = 5, ncpW = 2, ncpB = 2,
   X.tmp <- X
   if (link == "nonlinear3"){
   	for (j in 1:dim(X.tmp)[2]){
-	    X.tmp[,j] <-(mod(j,5)==1)*(((X.tmp[,j]<quantile(X.tmp[,j],0.7)) + (X.tmp[,j]> quantile(X.tmp[,j],0.2)))) +
-        					(mod(j,5)==2)*(1/(0.001+exp(X.tmp[,j]*x[1]))) +
-        					(mod(j,5)==3)*(-(X.tmp[,j])*(X.tmp[,2]>0)) +
-        					(mod(j,5)==4)*(-2.5*sqrt(abs(X.tmp[,j])))
+	    # X.tmp[,j] <-(mod(j,5)==1)*(10*((X.tmp[,j]<quantile(X.tmp[,j],0.7)) + (X.tmp[,j]> quantile(X.tmp[,j],0.2)))) +
+      #   					(mod(j,5)==2)*(5*exp(X.tmp[,j]*x[1])) +
+      #   					(mod(j,5)==3)*(8*(X.tmp[,j])*(X.tmp[,1]>0)) +
+      #   					(mod(j,5)==4)*(-2.5*sqrt(abs(X.tmp[,j])))
+      X.tmp[,j] <- (mod(j,5)==1)*((X.tmp[,j]<quantile(X.tmp[,j],0.7)) + (X.tmp[,j]> quantile(X.tmp[,j],0.2))) +
+                   (mod(j,5)==2)*(1/(0.001+exp(X.tmp[,j]*X.tmp[,1]))) +
+                   (mod(j,5)==3)*(-(X.tmp[,j])*(X.tmp[,2]>0)) +
+                   (mod(j,5)==4)*(-2.5*sqrt(abs(X.tmp[,j]))) +
+                   (mod(j,5)==0)*(X.tmp[,j-2]*X.tmp[,j])
 		} 
   }
   if (cio){
@@ -732,10 +757,15 @@ gen_dlvm <- function(n, p, d=3, h = 5,
   X.tmp <- X
   if (link == "nonlinear3"){
   	for (j in 1:dim(X.tmp)[2]){
-	    X.tmp[,j] <-(mod(j,5)==1)*(((codes[,j]<quantile(codes[,j],0.7)) + (codes[,j]> quantile(codes[,j],0.2)))) +
-        					(mod(j,5)==2)*(1/(0.001+exp(codes[,j]*x[1]))) +
-        					(mod(j,5)==3)*(-(codes[,j])*(codes[,2]>0)) +
-        					(mod(j,5)==4)*(-2.5*sqrt(abs(codes[,j])))
+	    # X.tmp[,j] <-(mod(j,5)==1)*(10*((X.tmp[,j]<quantile(X.tmp[,j],0.7)) + (X.tmp[,j]> quantile(X.tmp[,j],0.2)))) +
+      #             (mod(j,5)==2)*(5*exp(X.tmp[,j]*x[1])) +
+      #             (mod(j,5)==3)*(8*(X.tmp[,j])*(X.tmp[,1]>0)) +
+      #             (mod(j,5)==4)*(-2.5*sqrt(abs(X.tmp[,j])))
+      X.tmp[,j] <- (mod(j,5)==1)*((X.tmp[,j]<quantile(X.tmp[,j],0.7)) + (X.tmp[,j]> quantile(X.tmp[,j],0.2))) +
+                   (mod(j,5)==2)*(1/(0.001+exp(X.tmp[,j]*X.tmp[,1]))) +
+                   (mod(j,5)==3)*(-(X.tmp[,j])*(X.tmp[,2]>0)) +
+                   (mod(j,5)==4)*(-2.5*sqrt(abs(X.tmp[,j]))) +
+                   (mod(j,5)==0)*(X.tmp[,j-2]*X.tmp[,j])
 		} 
   }
   if (cio){
@@ -852,10 +882,15 @@ gen_dlvm2 <- function(n, p, d=3, h = 5,
 
   if (link == "nonlinear3"){
   	for (j in 1:dim(codes)[2]){
-	    codes[,j] <-(mod(j,5)==1)*(((codes[,j]<quantile(codes[,j],0.7)) + (codes[,j]> quantile(codes[,j],0.2)))) +
-        					(mod(j,5)==2)*(1/(0.001+exp(codes[,j]*x[1]))) +
-        					(mod(j,5)==3)*(-(codes[,j])*(codes[,2]>0)) +
-        					(mod(j,5)==4)*(-2.5*sqrt(abs(codes[,j])))
+	    # codes[,j] <-(mod(j,5)==1)*(10*((codes[,j]<quantile(codes[,j],0.7)) + (codes[,j]> quantile(codes[,j],0.2)))) +
+      #   					(mod(j,5)==2)*(5*exp(codes[,j]*x[1])) +
+      #   					(mod(j,5)==3)*(8*(codes[,j])*(codes[,1]>0)) +
+      #   					(mod(j,5)==4)*(-2.5*sqrt(abs(codes[,j])))
+      codes[,j] <- (mod(j,5)==1)*((codes[,j]<quantile(codes[,j],0.7)) + (codes[,j]> quantile(codes[,j],0.2))) +
+                   (mod(j,5)==2)*(1/(0.001+exp(codes[,j]*codes[,1]))) +
+                   (mod(j,5)==3)*(-(codes[,j])*(codes[,2]>0)) +
+                   (mod(j,5)==4)*(-2.5*sqrt(abs(codes[,j]))) +
+                   (mod(j,5)==0)*(codes[,3]*codes[,j])
 		} 
   }
 

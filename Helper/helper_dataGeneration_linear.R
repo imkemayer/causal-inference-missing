@@ -105,6 +105,7 @@ gen_linear <- function(n, p=10, r = 3, setting = "linear1",
     Sigma <- diag(p) + rho*upper.tri(diag(p)) + rho*lower.tri(diag(p))
   }
   
+  Z <- NULL
   
   # Covariates
   if (setting %in% c(1,2)){
@@ -292,6 +293,7 @@ gen_linear <- function(n, p=10, r = 3, setting = "linear1",
   }
   if (setting == 3){
     X <- X.proxy
+    Z <- dat$Z
   }
   
   sample <- list("X" = X,
@@ -300,7 +302,7 @@ gen_linear <- function(n, p=10, r = 3, setting = "linear1",
                  "y" = y,
                  "X.incomp" = X.incomp,
                  "tau" = rep(tau, n),
-                 "class" = NULL,
+                 "class" = Z,
                  "X.proxy" = X.proxy)
   return(sample)
 }

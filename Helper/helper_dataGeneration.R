@@ -48,6 +48,16 @@ generate_sim <- function(n, p = 10, r = 3, ng = 5,
     return(sample)
   }
   
+  if (setting == "dlvm2"){
+    sample <- gen_dlvm2(n, p, d=3, 
+                       sd=sd, seed=seed, 
+                       mechanism=mechanism, prop.missing=prop.missing, 
+                       cit=cit, cio=cio,
+                       link = link,
+                       sigma.structure = sigma.structure)
+    return(sample)
+  }
+  
   if (setting == "ding1"){
     sample <- gen_ding(n, set = 1, 
                        seed = seed,
