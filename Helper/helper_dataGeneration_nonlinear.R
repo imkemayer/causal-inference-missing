@@ -879,7 +879,7 @@ gen_dlvm2 <- function(n, p, d=3, h = 5,
   ps <- assignment[1,]
   treat <- assignment[2,]
   
-
+  old_codes <- codes
   if (link == "nonlinear3"){
   	for (j in 1:dim(codes)[2]){
 	    # codes[,j] <-(mod(j,5)==1)*(10*((codes[,j]<quantile(codes[,j],0.7)) + (codes[,j]> quantile(codes[,j],0.2)))) +
@@ -902,6 +902,7 @@ gen_dlvm2 <- function(n, p, d=3, h = 5,
   
   tau <- y.1 - y.0
   
+  codes <- old_codes
   return(list("X" = X,
               "ps" = ps,
               "treat" = treat,
