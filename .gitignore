@@ -5,7 +5,9 @@
 *.sh
 *.RData
 *.csv
-*/Scripts/*
-*/Figures/*
+*.html
+*.pdf
+Scripts/
+Figures/
 *_files
 *_cache
