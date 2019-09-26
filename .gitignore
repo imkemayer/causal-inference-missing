@@ -4,6 +4,7 @@
 .Rprofile
 *.sh
 *.RData
+*.csv
 */Scripts/
 */Figures/
 *_files
