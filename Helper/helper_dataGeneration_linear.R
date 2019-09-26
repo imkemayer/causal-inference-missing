@@ -67,7 +67,10 @@ latent_confounders <- function(V, n=100, p=10,r=3,sig=0.1){ # sig=0.25
 gen_linear <- function(n, p=10, r = 3, setting = "linear1",
                        seed = 0, ps.dependence = "strong", sd = 1, 
                        mechanism=FALSE, prop.missing = 0,
-                       cit = FALSE, cio = FALSE, link = "log-lin",
+                       cit = FALSE, cio = FALSE, 
+                       cit2 = FALSE, cio2 = FALSE,
+                       ci2_imp = "mice",
+                       link = "log-lin",
                        V = NULL){
   # setting="linear1" 
   #   - case 1: mechanism="MCAR": p orthogonal covariates with NA in all covariates
@@ -86,6 +89,9 @@ gen_linear <- function(n, p=10, r = 3, setting = "linear1",
   #   - case 2: mechanism="MAR": k latent confounders, p covariates with NA in half of the covariates with NA depending on p/2 remaining covariates
   #
   # cit/cio: one treatment and outcome model per observed response pattern
+  # cit2/cio2: missing values in confounders are imputed (multiple imputation with mice and take elementwise average over imputations)
+  #            and treatment and outcome are defined using the imputed confounders 
+  #            (only applicable for linear1, linear2)
   
   if (setting=="linear1") setting <- 1
   if (setting=="linear2") setting <- 2
@@ -217,6 +223,16 @@ gen_linear <- function(n, p=10, r = 3, setting = "linear1",
   if (cit & setting %in% c(1,2)) {
     X.tmp[idx_NA] <- 0
   } 
+  
+  if (cit2 & setting %in% c(1,2)) {
+    if (ci2_imp == "mice"){
+      X.imp <- get_MICE(X.incomp, seed=0, m=5, maxit=5)
+    } else {
+      X.imp <- missMDA::MIPCA(X.incomp, ncp = d, nboot = 5)$res.MI
+    }
+    tmp <-Reduce("+", X.imp) / length(X.imp) # take elementwise average over imputations
+    X.tmp[idx_NA] <- tmp[idx_NA]
+  } 
 
   if (ps.dependence=="strong"){
       alpha <- array(alpha.star.strong, dim = dim(X.tmp)[2])
@@ -232,11 +248,24 @@ gen_linear <- function(n, p=10, r = 3, setting = "linear1",
   i <- 1
   best_idx <- 1
   min_diff <- 1
+  if (link == "nonlinear3"){
+    for (j in 1:dim(X.tmp)[2]){
+      X.tmp[,j] <- (mod(j,5)==1)*((X.tmp[,j]<quantile(X.tmp[,j],0.7)) + (X.tmp[,j]> quantile(X.tmp[,j],0.2))) +
+                   (mod(j,5)==2)*(1/(0.001+exp(X.tmp[,j]*X.tmp[,1]))) +
+                   (mod(j,5)==3)*(-(X.tmp[,j])*(X.tmp[,2]>0)) +
+                   (mod(j,5)==4)*(-2.5*sqrt(abs(X.tmp[,j]))) +
+                   (mod(j,5)==0)*(X.tmp[,3]*X.tmp[,j])
+    } 
+  }
   while ((i <= length(offsets)) & !(balanced) ){
     if (link == "log-lin"){
       prop_scores <- apply(data.frame(X.tmp), MARGIN=1, 
                           FUN = function(z) expit(offsets[i]+2*(setting==3)+ z%*%alpha))
-    } else {
+    } else if (link == "nonlinear3"){
+      prop_scores <- apply(data.frame(X.tmp), MARGIN=1, 
+                          FUN = function(z) expit(offsets[i]+2*(setting==3)+ z%*%alpha))
+    }
+    else {
       prop_scores <- rep(0, dim(X.tmp)[1])
       for (j in 1:dim(X.tmp)[2]){
         prop_scores <- prop_scores + (mod(j,5)==1)*(X.tmp[,j]*0.03*cos(5*X.tmp[,j]) - 0.2*X.tmp[,j]^2) +
@@ -278,12 +307,33 @@ gen_linear <- function(n, p=10, r = 3, setting = "linear1",
   
   if (cio & setting %in% c(1,2)) {
     X.tmp[idx_NA] <- 0
-  } 
+  }
+  if (cio2 & setting %in% c(1,2)) {
+    if (ci2_imp == "mice"){
+      X.imp <- get_MICE(X.incomp, seed=0, m=5, maxit=5)
+    } else {
+      X.imp <- missMDA::MIPCA(X.incomp, ncp = d, nboot = 5)$res.MI
+    }
+    tmp <-Reduce("+", X.imp) / length(X.imp) # take elementwise average over imputations
+    X.tmp[idx_NA] <- tmp[idx_NA]
+  }  
+  if (link == "nonlinear3") {
+    for (j in 1:dim(X.tmp)[2]){
+      X.tmp[,j] <- (mod(j,5)==1)*((X.tmp[,j]<quantile(X.tmp[,j],0.7)) + (X.tmp[,j]> quantile(X.tmp[,j],0.2))) +
+        (mod(j,5)==2)*(1/(0.001+exp(X.tmp[,j]*X.tmp[,1]))) +
+        (mod(j,5)==3)*(-(X.tmp[,j])*(X.tmp[,2]>0)) +
+        (mod(j,5)==4)*(-2.5*sqrt(abs(X.tmp[,j]))) +
+        (mod(j,5)==0)*(X.tmp[,3]*X.tmp[,j])
+    }
+  }
+   
 
+
+  
   beta <- array(beta.star[2:length(beta.star)], dim = dim(X.tmp)[2])
 
   
-  if (link == "log-lin"){
+  if (link %in% c("log-lin", "nonlinear3")){
     y[which(treat==1)] <- X.tmp[which(treat==1),]%*%beta + beta.star[1] + tau + epsilons[which(treat==1)]
     y[which(!(treat==1))] <- X.tmp[which(!(treat==1)),]%*%beta + beta.star[1] + epsilons[which(!(treat==1))]
   }

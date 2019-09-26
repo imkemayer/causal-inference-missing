@@ -94,3 +94,12 @@ recover_pca_gaussian_cv <- function(X, r_seq, nfolds = 3){
   result = softImpute(X, rank.max = best_r, type = "als", maxit = 1000, warm.start = warm)
   list(Uhat = result$u, best_r = best_r, Xhat = result$u%*%diag(result$d)%*%t(result$v))
 }
+
+recover_pca_gaussian <- function(X, r){
+  # Gaussian matrix factorization on the noisy proxy matrix design$Xm 
+  #     with given rank
+  #     the matrix factorization is carried out by the softImpute package  
+  
+  result = softImpute(X, rank.max = r, type = "als", maxit = 1000)
+  list(Uhat = result$u, Xhat = result$u%*%diag(result$d)%*%t(result$v))
+}

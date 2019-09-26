@@ -3,6 +3,8 @@ generate_sim <- function(n, p = 10, r = 3, ng = 5,
                          seed = 0,
                          mechanism=FALSE, prop.missing = 0, 
                          cit = FALSE, cio = FALSE,
+                         cit2 = FALSE, cio2 = FALSE,
+                         ci2_imp = "mice",
                          setting = "latentclass",
                          class.interaction = FALSE,
                          ps.dependence = "strong",
@@ -16,6 +18,7 @@ generate_sim <- function(n, p = 10, r = 3, ng = 5,
                          sd=sd, seed=seed, 
                          mechanism=mechanism, prop.missing=prop.missing, 
                          cit=cit, cio=cio,
+                         cit2=cit2, cio2=cio2,
                          V = V)
     return(sample)
   }
@@ -44,7 +47,9 @@ generate_sim <- function(n, p = 10, r = 3, ng = 5,
                        mechanism=mechanism, prop.missing=prop.missing, 
                        cit=cit, cio=cio,
                        link = link,
-                       sigma.structure = sigma.structure)
+                       sigma.structure = sigma.structure,
+                       cit2 = cit2, cio2 = cio2,
+                       ci2_imp = ci2_imp)
     return(sample)
   }
   

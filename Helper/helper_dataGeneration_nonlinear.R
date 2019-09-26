@@ -58,7 +58,7 @@ gen_treat_lat <- function(x, class.interaction = FALSE, link = "nonlinear"){
                    (mod(j,5)==2)*(1/(0.001+exp(x[j]*x[1]))) +
                    (mod(j,5)==3)*(-(x[j])*(x[2]>0)) +
                    (mod(j,5)==4)*(-2.5*sqrt(abs(x[j])))
-      if (mod(j,5)==0) f.x <- f.x + (x[j-2]*x[j])
+      if (mod(j,5)==0) f.x <- f.x + (x[3]*x[j])
     }
     offsets <- c(0.5, -2, seq(-100, 100, length.out = 50))
     balanced <- FALSE
@@ -506,11 +506,11 @@ gen_latentclass <- function(n, p, nb.class=3, mus = NULL, Sigmas = NULL, class.i
   }
   
   if (class.interaction){
-    y.1 <- apply(cbind(X, rep(1, n), class), MARGIN=1, FUN = function(x) gen_out_lat(x, class.interaction, sd=sd, link = link))
-    y.0 <- apply(cbind(X, rep(0, n), class), MARGIN=1, FUN = function(x) gen_out_lat(x, class.interaction, sd=sd, link = link))
+    y.1 <- apply(cbind(X.tmp, rep(1, n), class), MARGIN=1, FUN = function(x) gen_out_lat(x, class.interaction, sd=sd, link = link))
+    y.0 <- apply(cbind(X.tmp, rep(0, n), class), MARGIN=1, FUN = function(x) gen_out_lat(x, class.interaction, sd=sd, link = link))
   } else {
-    y.1 <- apply(cbind(X, rep(1, n)), MARGIN=1, FUN = function(x) gen_out_lat(x, FALSE, sd=sd, link = link))
-    y.0 <- apply(cbind(X, rep(0, n)), MARGIN=1, FUN = function(x) gen_out_lat(x, FALSE, sd=sd, link = link))
+    y.1 <- apply(cbind(X.tmp, rep(1, n)), MARGIN=1, FUN = function(x) gen_out_lat(x, FALSE, sd=sd, link = link))
+    y.0 <- apply(cbind(X.tmp, rep(0, n)), MARGIN=1, FUN = function(x) gen_out_lat(x, FALSE, sd=sd, link = link))
   }
   tau <- y.1 - y.0
   
@@ -640,11 +640,11 @@ gen_multisvd <- function(n, p, ngr = 5, ncpW = 2, ncpB = 2,
   }
   
   if (class.interaction){
-    y.1 <- apply(cbind(X, rep(1, n), as.factor(group)), MARGIN=1, FUN = function(x) gen_out_svd(x, class.interaction, sd=sd, link = link))
-    y.0 <- apply(cbind(X, rep(0, n), as.factor(group)), MARGIN=1, FUN = function(x) gen_out_svd(x, class.interaction, sd=sd, link = link))
+    y.1 <- apply(cbind(X.tmp, rep(1, n), as.factor(group)), MARGIN=1, FUN = function(x) gen_out_svd(x, class.interaction, sd=sd, link = link))
+    y.0 <- apply(cbind(X.tmp, rep(0, n), as.factor(group)), MARGIN=1, FUN = function(x) gen_out_svd(x, class.interaction, sd=sd, link = link))
   } else {
-    y.1 <- apply(cbind(X, rep(1, n)), MARGIN=1, FUN = function(x) gen_out_svd(x, FALSE, sd=sd, link = link))
-    y.0 <- apply(cbind(X, rep(0, n)), MARGIN=1, FUN = function(x) gen_out_svd(x, FALSE, sd=sd, link = link))
+    y.1 <- apply(cbind(X.tmp, rep(1, n)), MARGIN=1, FUN = function(x) gen_out_svd(x, FALSE, sd=sd, link = link))
+    y.0 <- apply(cbind(X.tmp, rep(0, n)), MARGIN=1, FUN = function(x) gen_out_svd(x, FALSE, sd=sd, link = link))
   }
   tau <- y.1 - y.0
   
@@ -664,7 +664,9 @@ gen_dlvm <- function(n, p, d=3, h = 5,
                      mechanism=FALSE, prop.missing = 0, 
                      cit = FALSE, cio = FALSE,
                      link = "nonlinear",
-                     sigma.structure = "diagonal"){
+                     sigma.structure = "diagonal",
+                     cit2 = FALSE, cio2 = FALSE,
+                     ci2_imp = "mice"){
   set.seed(0)
   gamma.mar.x <- (20/p)*(runif(n=floor(p/2))-0.5)
 
@@ -748,6 +750,15 @@ gen_dlvm <- function(n, p, d=3, h = 5,
     X.tmp[idx_NA] <- 0
   }
   
+  if (cit2){
+    if (ci2_imp == "mice"){
+      X.imp <- get_MICE(X.incomp, seed=0, m=5, maxit=5)
+    } else {
+      X.imp <- missMDA::MIPCA(X.incomp, ncp = d, nboot = 5)$res.MI
+    }
+    tmp <-Reduce("+", X.imp) / length(X.imp) # take elementwise average over imputations
+    X.tmp[idx_NA] <- tmp[idx_NA]
+  }
   
   assignment <- apply(X.tmp, MARGIN=1, FUN = function(x) gen_treat_deep(x, link = link))
   ps <- assignment[1,]
@@ -757,26 +768,42 @@ gen_dlvm <- function(n, p, d=3, h = 5,
   X.tmp <- X
   if (link == "nonlinear3"){
   	for (j in 1:dim(X.tmp)[2]){
-	    # X.tmp[,j] <-(mod(j,5)==1)*(10*((X.tmp[,j]<quantile(X.tmp[,j],0.7)) + (X.tmp[,j]> quantile(X.tmp[,j],0.2)))) +
-      #             (mod(j,5)==2)*(5*exp(X.tmp[,j]*x[1])) +
-      #             (mod(j,5)==3)*(8*(X.tmp[,j])*(X.tmp[,1]>0)) +
-      #             (mod(j,5)==4)*(-2.5*sqrt(abs(X.tmp[,j])))
-      X.tmp[,j] <- (mod(j,5)==1)*((X.tmp[,j]<quantile(X.tmp[,j],0.7)) + (X.tmp[,j]> quantile(X.tmp[,j],0.2))) +
+	    X.tmp[,j] <- (mod(j,5)==1)*((X.tmp[,j]<quantile(X.tmp[,j],0.7)) + (X.tmp[,j]> quantile(X.tmp[,j],0.2))) +
                    (mod(j,5)==2)*(1/(0.001+exp(X.tmp[,j]*X.tmp[,1]))) +
                    (mod(j,5)==3)*(-(X.tmp[,j])*(X.tmp[,2]>0)) +
                    (mod(j,5)==4)*(-2.5*sqrt(abs(X.tmp[,j]))) +
-                   (mod(j,5)==0)*(X.tmp[,j-2]*X.tmp[,j])
+                   (mod(j,5)==0)*(X.tmp[,3]*X.tmp[,j])
 		} 
   }
   if (cio){
     X.tmp[idx_NA] <- 0
   }
   
+  if (cio2){
+    X.tmp <- X
+    if (ci2_imp == "mice"){
+      X.imp <- get_MICE(X.incomp, seed=0, m=5, maxit=5)
+    } else {
+      X.imp <- missMDA::MIPCA(X.incomp, ncp = d, nboot = 5)$res.MI
+    }
+    tmp <-Reduce("+", X.imp) / length(X.imp) # take elementwise average over imputations
+    X.tmp[idx_NA] <- tmp[idx_NA]
+    if (link == "nonlinear3"){
+      for (j in 1:dim(X.tmp)[2]){
+        X.tmp[,j] <- (mod(j,5)==1)*((X.tmp[,j]<quantile(X.tmp[,j],0.7)) + (X.tmp[,j]> quantile(X.tmp[,j],0.2))) +
+          (mod(j,5)==2)*(1/(0.001+exp(X.tmp[,j]*X.tmp[,1]))) +
+          (mod(j,5)==3)*(-(X.tmp[,j])*(X.tmp[,2]>0)) +
+          (mod(j,5)==4)*(-2.5*sqrt(abs(X.tmp[,j]))) +
+          (mod(j,5)==0)*(X.tmp[,3]*X.tmp[,j])
+      } 
+    }
+  }
+  
   y <- apply(cbind(X.tmp, treat), MARGIN=1, FUN = function(x) gen_out_deep(x, sd=sd, link = link))
   
   
-  y.1 <- apply(cbind(X, rep(1, n)), MARGIN=1, FUN = function(x) gen_out_deep(x, sd=sd, link = link))
-  y.0 <- apply(cbind(X, rep(0, n)), MARGIN=1, FUN = function(x) gen_out_deep(x, sd=sd, link = link))
+  y.1 <- apply(cbind(X.tmp, rep(1, n)), MARGIN=1, FUN = function(x) gen_out_deep(x, sd=sd, link = link))
+  y.0 <- apply(cbind(X.tmp, rep(0, n)), MARGIN=1, FUN = function(x) gen_out_deep(x, sd=sd, link = link))
   
   tau <- y.1 - y.0
   
@@ -786,7 +813,7 @@ gen_dlvm <- function(n, p, d=3, h = 5,
               "y" = y,
               "X.incomp" = X.incomp,
               "tau" = tau,
-              "class" = NULL))
+              "class" = codes))
 }
 
 gen_dlvm2 <- function(n, p, d=3, h = 5,

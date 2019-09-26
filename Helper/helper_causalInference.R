@@ -108,6 +108,16 @@ predict_grf <- function(X, treat, seed){
   return(fitted)
 }
 
+# Regression forest (of ranger package) on complete X
+predict_ranger <- function(X, treat, seed){
+  set.seed(seed)
+  df <- data.frame(cbind(X, "w" = treat))
+  pred <- ranger::ranger(w ~., data=df,probability = TRUE)$predictions[,2]
+  fitted = as.data.frame(pred)
+  colnames(fitted) <- c("pscore")
+  return(fitted)
+}
+
 ###################################################################################
 ## Define IPW method
 ###################################################################################
@@ -174,7 +184,9 @@ ipw <- function(X, outcome, treat,
       fitted <- predict_gbm(X, as.factor(treat), seed)
     } else if (ps.method %in% c("grf","grf.ate")) {
       fitted <- predict_grf(X, as.factor(treat), seed)
-    } 
+    } else if (ps.method == "ranger"){
+      fitted <- predict_ranger(X, as.factor(treat), seed)
+    }
   }
   
   # Compute weights depending on the estimand
@@ -194,11 +206,13 @@ ipw <- function(X, outcome, treat,
   
   
   # Trim the weights (default: no trimming)
-  weightMax <- quantile(fitted$weight, c(trimming_weight), na.rm=TRUE) 
-  fitted[is.na(fitted$weight) ,"weight"] <- weightMax # If the weight is NA this means that pscore was 0
-  fitted[fitted$weight > weightMax,"weight"] <- weightMax
-  weightMin <- quantile(fitted$weight, c(1-trimming_weight)) 
-  fitted[fitted$weight < weightMin,"weight"] <- weightMin
+  if (any(is.nan(fitted$weight)) | any(is.infinite(fitted$weight))){
+    weightMax <- quantile(fitted$weight, c(trimming_weight), na.rm=TRUE) 
+    fitted[is.na(fitted$weight) ,"weight"] <- weightMax # If the weight is NA this means that pscore was 0
+    fitted[fitted$weight > weightMax,"weight"] <- weightMax
+    weightMin <- quantile(fitted$weight, c(1-trimming_weight)) 
+    fitted[fitted$weight < weightMin,"weight"] <- weightMin
+  }
   
   
   # Compute HT verion of IPW
