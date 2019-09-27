@@ -8,6 +8,7 @@
 *.html
 *.pdf
 *job*
+2019*.R
 Figures/
 *_files
 *_cache
