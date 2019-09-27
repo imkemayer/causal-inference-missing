@@ -7,7 +7,7 @@
 *.csv
 *.html
 *.pdf
-Scripts/
+*job*
 Figures/
 *_files
 *_cache
