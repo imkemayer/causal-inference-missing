@@ -1033,4 +1033,3 @@ if (use.w){
                                             "_forest", forest,
                                             "_results_dr_ipw_seed",id,
                                             ".RData"))
-}

@@ -2,8 +2,6 @@
 ################################################################
 # Compare different ATE estimators that handle missing values
 ################################################################
-# >= 13/08: "dlvm" = {confounders are X}, "dlvm2"/"dlvm3" = {confounders are Z}, 
-#           "linear1"/"linear2" =  = {confounders are X}, "mf" = {confounders are Z}
 
 # script.dir <- dirname(sys.frame(1)$ofile)
 script.dir <- "~/CausalInference/Simulations/causal-inference-missing/"
@@ -31,6 +29,8 @@ option_list = list(
               help="add the mask in miwae [default= %default]", metavar="boolean"),
   make_option(c("-w", "--w"), type="logical", default=FALSE, 
               help="w used in miwae [default= %default]", metavar="boolean"),
+  make_option(c("--wy"), type="logical", default=FALSE, 
+              help="w and y used in miwae [default= %default]", metavar="boolean"),
   make_option(c("--dmiwae"), type="integer", default=3, 
               help="number of latent variables estimated in miwae [default= %default]", metavar="number"),
   make_option(c("--hmiwae"), type="integer", default=128, 
@@ -54,7 +54,11 @@ option_list = list(
 opt_parser = OptionParser(option_list=option_list);
 opt = parse_args(opt_parser);
 
-# #######
+################################
+# # Define some helper functions
+################################
+
+### Function: fit conditional response surfaces models with linear regression
 fit_outcome_glm <- function(X, y, treat){
   df.treated <- data.frame(y = y[which(treat==1)], X = X[which(treat==1),])
   colnames(df.treated) <- c("y", paste("X", 1:dim(X)[2], sep=""))
@@ -80,6 +84,7 @@ fit_outcome_glm <- function(X, y, treat){
   return(data.frame(y_1.hat = y_1.hat, y_0.hat = y_0.hat))
 }
 
+### Function: prepare data by imputing missing values or estimating latent factors
 prepare_data_ate <- function(df, w, y, imputation.method, mi.m, 
                              mask,
                              use.outcome, use.interaction,
@@ -164,15 +169,29 @@ prepare_data_ate <- function(df, w, y, imputation.method, mi.m,
   return(list(df.imp = df.imp, fitted = fitted))
 }
 
+### Function: rename entry labels in result vectors
+change_colnames <- function(df, col.names){
+  colnames(df) <- col.names
+  return(df)
+}
 
-data.dir <- "./MissDeepCausal/Synthetic/Data/"
-rdata.dir <- "./MissDeepCausal/Synthetic/RData/"
+dr.col.names <- c("dr", "se", "prop.missing", "seed", "regression")
+ipw.col.names <- c("ipw1", "ipw2", "se", "prop.missing", "seed", "regression")
+
+
+########################
+# # Set global variables
+########################
+
+
+data.dir <- "./MissDeepCausal/Synthetic/Data/" # location of csv files to be loaded for analysis
+rdata.dir <- "./MissDeepCausal/Synthetic/RData/" # location where to save analysis results (RData files)
 
 h <- 5 # number of hidden units in DLVM data generating model
 sd <- 0.1 # noise sd used in data generation
 mi.m <- 10 # number of multiple imputations
 
-# Fetch all arguments
+### Fetch all arguments from script call
 if (opt$mask){
   add_mask <- "_mask"
 } else {
@@ -187,6 +206,7 @@ d <- opt$nlat
 mech <- opt$mech
 perc.miss <- opt$percmiss
 use.w <- opt$w
+use.wy <- opt$wy
 d.miwae <- opt$dmiwae
 h.miwae <- opt$hmiwae
 num.samples.sir <- opt$nzmult
@@ -196,45 +216,30 @@ ci2_imp <- opt$ci2_imp
 forest <- opt$forest
 id <- opt$id
 
+### Set temporary variables
 set.seed(0)
-V <- make_V(d, p)
+V <- make_V(d, p) # only relevant for `mf` setting (this is the loadings matrix)
 
 
-dr.loglin.miwae <- c()
-dr.loglin.full <- c()
-dr.loglin.cc <- c()
-dr.loglin.mice.woy <- c()
-dr.loglin.mice.wy <- c()
-dr.loglin.mi.miwae <- c()
-dr.loglin.mf <- c()
-dr.loglin.mf.cv <- c()
+### Initialize the vectors that will contain analysis results
+dr.loglin.miwae <- ipw.loglin.miwae <- c()
+dr.loglin.full <- ipw.loglin.full <- c()
+dr.loglin.cc <- ipw.loglin.cc <- c()
+dr.loglin.mice.woy <- ipw.loglin.mice.woy <- c()
+dr.loglin.mice.wy <- ipw.loglin.mice.wy <- c()
+dr.loglin.mf <- ipw.loglin.mf <- c()
+dr.loglin.mf.cv <- ipw.loglin.mf.cv <- c()
 
-dr.grf.miwae <- c()
-dr.grf.full <- c()
-dr.grf.cc <- c()
-dr.grf.mice.woy <- c()
-dr.grf.mice.wy <- c()
-dr.grf.mf <- c()
-dr.grf.mf.cv <- c()
-dr.grf.mia <- c()
 
-ipw.loglin.miwae <- c()
-ipw.loglin.full <- c()
-ipw.loglin.cc <- c()
-ipw.loglin.mice.woy <- c()
-ipw.loglin.mice.wy <- c()
-ipw.loglin.mi.miwae <- c()
-ipw.loglin.mf <- c()
-ipw.loglin.mf.cv <- c()
+dr.grf.miwae <- ipw.grf.miwae <- c()
+dr.grf.full <- ipw.grf.full <- c()
+dr.grf.cc <- ipw.grf.cc <- c()
+dr.grf.mice.woy <- ipw.grf.mice.woy <- c()
+dr.grf.mice.wy <- ipw.grf.mice.wy <- c()
+dr.grf.mf <- ipw.grf.mf <- c()
+dr.grf.mf.cv <- ipw.grf.mf.cv <- c()
+dr.grf.mia <- ipw.grf.mia <- c()
 
-ipw.grf.full <- c()
-ipw.grf.miwae <- c()
-ipw.grf.cc <- c()
-ipw.grf.mice.woy <- c()
-ipw.grf.mice.wy <- c()
-ipw.grf.mia <- c()
-ipw.grf.mf <- c()
-ipw.grf.mf.cv <- c()
 
 dr.grf.miwae.zmul <- ipw.grf.miwae.zmul <- c()
 dr.loglin.miwae.zmul <- ipw.loglin.miwae.zmul <- c()
@@ -246,7 +251,7 @@ dr.loglin.miwae.agg <- ipw.loglin.miwae.agg <- c()
 print(paste0("ATE estimation for data set ", id))
 Z <- NULL
 if (setting %in% c("mf", "dlvm2", "dlvm3")){
-  Z <- read.csv(file = paste0(data.dir, setting, 
+  Z <- read.csv(file = paste0(data.dir, setting, "_", link,
                               "_", n, "_", p, "_", d, "_seed", id, 
                               "_propNA", format(round(perc.miss, 2), nsmall=2),
                               "_z.csv"))
@@ -314,7 +319,7 @@ if (setting == "dlvm3") {
 y <- tmp$y
 treat <- tmp$treat
 
-data_miss <- read.csv(file = paste0(data.dir, setting, "_", 
+data_miss <- read.csv(file = paste0(data.dir, setting, "_", link, "_",
                                     n, "_", p, "_", d,
                                     "_seed", id, 
                                     "_propNA", format(round(perc.miss, 2), nsmall=2),
@@ -325,7 +330,7 @@ if (dim(data_miss)[2] > p){
 }
 data_miss <- data.frame(apply(data_miss, c(1,2), FUN = function(x) ifelse(is.nan(x), NA, x)))
 
-data_comp <- read.csv(file = paste0(data.dir, setting, "_", 
+data_comp <- read.csv(file = paste0(data.dir, setting,  "_", link, "_", 
                                     n, "_", p, "_", d,
                                     "_seed", id, 
                                     "_propNA", format(round(perc.miss, 2), nsmall=2),
@@ -334,40 +339,53 @@ if (dim(data_comp)[2] > p){
   data_comp <- data_comp[,-1]
 }
 
-if (d.miwae == 3){
+# if (d.miwae == 3){
+#   if (use.w){
+#     data_zhat_miwae <- read.csv(file = paste0(data.dir, setting, "_", n, "_", p, "_", d, 
+#                                               "_W_hmiwae", h.miwae, add_mask, 
+#                                               "_seed", id, 
+#                                               "_propNA", format(round(perc.miss, 2), nsmall=2),
+#                                               "_zhat.csv"), 
+#                                 sep = ";", header=F)
+#   } else {
+#     data_zhat_miwae <- read.csv(file = paste0(data.dir, setting, "_", n, "_", p, "_", d, 
+#                                               "_hmiwae", h.miwae, add_mask, 
+#                                               "_seed", id, 
+#                                               "_propNA", format(round(perc.miss, 2), nsmall=2),
+#                                               "_zhat.csv"), 
+#                                 sep = ";", header=F)
+#   }
+# } else {
   if (use.w){
-    data_zhat_miwae <- read.csv(file = paste0(data.dir, setting, "_", n, "_", p, "_", d, 
-                                              "_W_hmiwae", h.miwae, add_mask, 
-                                              "_seed", id, 
-                                              "_propNA", format(round(perc.miss, 2), nsmall=2),
-                                              "_zhat.csv"), 
-                                sep = ";", header=F)
-  } else {
-    data_zhat_miwae <- read.csv(file = paste0(data.dir, setting, "_", n, "_", p, "_", d, 
-                                              "_hmiwae", h.miwae, add_mask, 
-                                              "_seed", id, 
-                                              "_propNA", format(round(perc.miss, 2), nsmall=2),
-                                              "_zhat.csv"), 
-                                sep = ";", header=F)
-  }
-} else {
-  if (use.w){
-    data_zhat_miwae <- read.csv(file = paste0(data.dir, setting, "_", n, "_", p, "_", d, 
+    data_zhat_miwae <- read.csv(file = paste0(data.dir, setting,  "_", link,"_", n, "_", p, "_", d, 
                                               "_W_dmiwae", d.miwae, "_hmiwae", h.miwae, add_mask, 
                                               "_seed", id, 
                                               "_propNA", format(round(perc.miss, 2), nsmall=2),
                                               "_zhat.csv"), 
                                 sep = ";", header=F)
-  } else {
-    data_zhat_miwae <- read.csv(file = paste0(data.dir, setting, "_", n, "_", p, "_", d, 
-                                              "_dmiwae", d.miwae, "_hmiwae", h.miwae, add_mask, 
+  } else if (use.wy){
+    data_zhat_miwae <- read.csv(file = paste0(data.dir, setting,  "_", link,"_", n, "_", p, "_", d, 
+                                              "_WY_dmiwae", d.miwae, "_hmiwae", h.miwae, add_mask, 
                                               "_seed", id, 
                                               "_propNA", format(round(perc.miss, 2), nsmall=2),
                                               "_zhat.csv"), 
                                 sep = ";", header=F)
+  } else {
+    try(data_zhat_miwae <- read.csv(file = paste0(data.dir, setting,  "_", link,"_", n, "_", p, "_", d, 
+                                              "_dmiwae", d.miwae, "_hmiwae", h.miwae, add_mask, 
+                                              "_seed", id, 
+                                              "_propNA", format(round(perc.miss, 2), nsmall=2),
+                                              "_zhat.csv"), 
+                                sep = ";", header=F))
+    try(data_zhat_miwae <- read.csv(file = paste0(data.dir, setting, "_", n, "_", p, "_", d, 
+                                              "_dmiwae", d.miwae, "_hmiwae", h.miwae, add_mask, 
+                                              "_seed", id, 
+                                              "_propNA", format(round(perc.miss, 2), nsmall=2),
+                                              "_zhat.csv"), 
+                                sep = ";", header=F))
   }
-}
-if (dim(data_zhat_miwae)[2] > d){
+# }
+if (dim(data_zhat_miwae)[2] > d.miwae){
   data_zhat_miwae <- data_zhat_miwae[,-1]
 }
 
@@ -472,6 +490,7 @@ if (setting %in% c("mf", "dlvm2", "dlvm3")){
   ipw.grf.full <- rbind(ipw.grf.full, cbind(tt, perc.miss, id, forest))
 }
 
+## Complete cases
 if (forest == "grf"){
   try(c.forest.cc <- grf::causal_forest(data_miss[rows.cc, ], y[rows.cc ], treat[rows.cc ]))
 } else {
@@ -679,19 +698,11 @@ dr.grf.mia <- rbind(dr.grf.mia, cbind(t(ate.mia), perc.miss, id, forest))
 
 
 
-change_colnames <- function(df, col.names){
-  colnames(df) <- col.names
-  return(df)
-}
+###########################################
+# # Prepare and save first batch of results
+###########################################
 
-
-
-
-
-dr.col.names <- c("dr", "se", "prop.missing", "seed", "regression")
-ipw.col.names <- c("ipw1", "ipw2", "se", "prop.missing", "seed", "regression")
-
-
+### Rename results
 dr.loglin.miwae <- change_colnames(data.frame(dr.loglin.miwae), dr.col.names)
 dr.loglin.miwae$dr <- as.double(as.character(dr.loglin.miwae$dr))
 dr.loglin.miwae$se <- as.double(as.character(dr.loglin.miwae$se))
@@ -748,62 +759,160 @@ ipw.grf.mf.cv <- change_colnames(data.frame(ipw.grf.mf.cv), ipw.col.names)
 
 print(paste0('renamed first set of results for data set ', id))
 
-print("dr.loglin.miwae")
-print(dr.loglin.miwae)
-print("***********************************")
+### Aggregate results
 
-# ####### Add estimation on sampled Z.hat
+dr.loglin <- rbind(cbind(dr.loglin.mice.woy, method = rep("loglin.mice.woy",dim(dr.loglin.mice.woy)[1])),
+                   cbind(dr.loglin.mice.wy, method = rep("loglin.mice.wy",dim(dr.loglin.mice.wy)[1])),
+                   cbind(dr.loglin.mf, method = rep("loglin.mf",dim(dr.loglin.mf)[1])),
+                   cbind(dr.loglin.mf.cv, method = rep("loglin.mf.cv",dim(dr.loglin.mf.cv)[1])),
+                   cbind(dr.loglin.miwae, method = rep("loglin.miwae",dim(dr.loglin.miwae)[1])),
+                   cbind(dr.loglin.full, method = rep("loglin.Z_true",dim(dr.loglin.full)[1])),
+                   cbind(dr.grf.mice.woy, method = rep("grf.mice.woy",dim(dr.grf.mice.woy)[1])),
+                   cbind(dr.grf.mice.wy, method = rep("grf.mice.wy",dim(dr.grf.mice.wy)[1])),
+                   cbind(dr.grf.miwae, method = rep("grf.miwae",dim(dr.grf.miwae)[1])),
+                   cbind(dr.grf.full, method = rep("grf.Z_true",dim(dr.grf.full)[1])),
+                   cbind(dr.grf.mf, method = rep("grf.mf",dim(dr.grf.mf)[1])),
+                   cbind(dr.grf.mf.cv, method = rep("grf.mf.cv",dim(dr.grf.mf.cv)[1])),
+                   cbind(dr.grf.mia, method = rep("grf.mia",dim(dr.grf.mia)[1])))
+print(paste0("first dr rbind passed for data set ", id))
+
+try(dr.loglin <- rbind(dr.loglin, 
+                       cbind(dr.grf.cc, method = rep("grf.cc",dim(dr.grf.cc)[1])),
+                       cbind(dr.loglin.cc, method = rep("loglin.cc",dim(dr.loglin.cc)[1]))))
+
+print(paste0("second dr rbind passed for data set ", id))
+
+ipw.loglin <- rbind(cbind(data.frame(ipw.loglin.mice.woy), method = rep("loglin.mice.woy",dim(ipw.loglin.mice.woy)[1])),
+                    cbind(data.frame(ipw.loglin.mice.wy), method = rep("loglin.mice.wy",dim(ipw.loglin.mice.wy)[1])),
+                    cbind(data.frame(ipw.loglin.mf), method = rep("loglin.mf",dim(ipw.loglin.mf)[1])),
+                    cbind(data.frame(ipw.loglin.mf.cv), method = rep("loglin.mf.cv",dim(ipw.loglin.mf.cv)[1])),
+                    cbind(data.frame(ipw.loglin.miwae), method = rep("loglin.miwae",dim(ipw.loglin.miwae)[1])),
+                    cbind(data.frame(ipw.loglin.full), method = rep("loglin.Z_true",dim(ipw.loglin.full)[1])),
+                    cbind(data.frame(ipw.grf.mice.woy), method = rep("grf.mice.woy",dim(ipw.grf.mice.woy)[1])),
+                    cbind(data.frame(ipw.grf.mice.wy), method = rep("grf.mice.wy",dim(ipw.grf.mice.wy)[1])),
+                    cbind(data.frame(ipw.grf.full), method = rep("grf.Z_true",dim(ipw.grf.full)[1])),
+                    cbind(data.frame(ipw.grf.mia), method = rep("grf.mia",dim(ipw.grf.mia)[1])),
+                    cbind(data.frame(ipw.grf.miwae), method = rep("grf.miwae",dim(ipw.grf.miwae)[1])),
+                    cbind(data.frame(ipw.grf.mf), method = rep("grf.mf",dim(ipw.grf.mf)[1])),
+                    cbind(data.frame(ipw.grf.mf.cv), method = rep("grf.mf.cv",dim(ipw.grf.mf.cv)[1])))
+print(paste0("first ipw rbind passed for data set ", id))
+
+try(ipw.loglin <- rbind(ipw.loglin,
+                        cbind(data.frame(ipw.loglin.cc), method = rep("loglin.cc",dim(ipw.loglin.cc)[1])),
+                        cbind(data.frame(ipw.grf.cc), method = rep("grf.cc",dim(ipw.grf.cc)[1]))))
+
+print(paste0("second ipw rbind passed for data set ", id))
+
+
+### Save results
+if (use.w){
+  save(dr.loglin, ipw.loglin, file = paste0(rdata.dir, opt$out_date, 
+                                          "_",link,"_",setting, 
+                                          "_n", n, "_p", p, "_d", d, 
+                                          "_W_dmiwae", d.miwae, "_hmiwae", h.miwae,
+                                          "_",add_mask,
+                                          "_sir", num.samples.sir,
+                                          "_propNA", format(round(perc.miss, 2), nsmall=2),
+                                          "_cit2", as.logical(cit2),
+                                          "_ci2Imp", ci2_imp,
+                                          "_forest", forest,
+                                          "_results_dr_ipw_seed",id,
+                                          ".RData"))
+} else if (use.wy){
+  save(dr.loglin, ipw.loglin, file = paste0(rdata.dir, opt$out_date, 
+                                          "_",link,"_",setting, 
+                                          "_n", n, "_p", p, "_d", d, 
+                                          "_WY_dmiwae", d.miwae, "_hmiwae", h.miwae,
+                                          "_",add_mask,
+                                          "_sir", num.samples.sir,
+                                          "_propNA", format(round(perc.miss, 2), nsmall=2),
+                                          "_cit2", as.logical(cit2),
+                                          "_ci2Imp", ci2_imp,
+                                          "_forest", forest,
+                                          "_results_dr_ipw_seed",id,
+                                          ".RData"))
+} else {
+  save(dr.loglin, ipw.loglin, file = paste0(rdata.dir, opt$out_date, 
+                                            "_",link,"_",setting, 
+                                            "_n", n, "_p", p, "_d", d, 
+                                            "_dmiwae", d.miwae, "_hmiwae", h.miwae,
+                                            "_",add_mask,
+                                            "_sir", num.samples.sir,
+                                            "_propNA", format(round(perc.miss, 2), nsmall=2),
+                                            "_cit2", as.logical(cit2),
+                                            "_ci2Imp", ci2_imp,
+                                            "_forest", forest,
+                                            "_results_dr_ipw_seed",id,
+                                            ".RData"))
+}
+
+############################################
+# # Add estimation on sampled Z.hat
+# # (multiple imputation and e^* estimation)
+############################################
 
 w.hat.grf.agg <- y.hat.grf.agg <- c()
 ipw.grf.agg <- c()
 dr.grf.agg <- c()
-w.hat.log.agg <- c()
-y_1.hat.lin.agg <- y_0.hat.lin.agg <- c()
+w.hat.log.agg <- y_1.hat.lin.agg <- y_0.hat.lin.agg <- c()
 ipw.loglin.agg <- c()
 dr.loglin.agg <- c()
 
 
 w.hat.grf.mul <- y.hat.grf.mul <- c()
-w.hat.log.mul <- c()
-y_1.hat.lin.mul <- y_0.hat.lin.mul <- c()
+w.hat.log.mul <- y_1.hat.lin.mul <- y_0.hat.lin.mul <- c()
 for (k in 0:(num.samples.sir-1)){
   cat(paste(k," "))
-  if (d.miwae == 3){
+  # if (d.miwae == 3){
+  #   if (use.w){
+  #     data_zhat_miwae <- read.csv(file = paste0(data.dir, setting, "_", n, "_", p, "_", d, 
+  #                                               "_W_hmiwae", h.miwae, add_mask, 
+  #                                               "_seed", id, 
+  #                                               "_propNA", format(round(perc.miss, 2), nsmall=2),
+  #                                               "_zhat_m",k,".csv"), 
+  #                                 sep = ";", header=F)
+  #   } else {
+  #     data_zhat_miwae <- read.csv(file = paste0(data.dir, setting, "_", n, "_", p, "_", d, 
+  #                                               "_hmiwae", h.miwae, add_mask, 
+  #                                               "_seed", id, 
+  #                                               "_propNA", format(round(perc.miss, 2), nsmall=2),
+  #                                               "_zhat_m",k,".csv"), 
+  #                                 sep = ";", header=F)
+  #   }
+  # } else {
     if (use.w){
-      data_zhat_miwae <- read.csv(file = paste0(data.dir, setting, "_", n, "_", p, "_", d, 
-                                                "_W_hmiwae", h.miwae, add_mask, 
-                                                "_seed", id, 
-                                                "_propNA", format(round(perc.miss, 2), nsmall=2),
-                                                "_zhat_m",k,".csv"), 
-                                  sep = ";", header=F)
-    } else {
-      data_zhat_miwae <- read.csv(file = paste0(data.dir, setting, "_", n, "_", p, "_", d, 
-                                                "_hmiwae", h.miwae, add_mask, 
-                                                "_seed", id, 
-                                                "_propNA", format(round(perc.miss, 2), nsmall=2),
-                                                "_zhat_m",k,".csv"), 
-                                  sep = ";", header=F)
-    }
-  } else {
-    if (use.w){
-      data_zhat_miwae <- read.csv(file = paste0(data.dir, setting, "_", n, "_", p, "_", d, 
+      data_zhat_miwae <- read.csv(file = paste0(data.dir, setting, "_", link, "_", n, "_", p, "_", d, 
                                                 "_W_dmiwae", d.miwae, "_hmiwae", h.miwae, add_mask, 
                                                 "_seed", id, 
                                                 "_propNA", format(round(perc.miss, 2), nsmall=2),
                                                 "_zhat_m",k,".csv"), 
                                   sep = ";", header=F)
-    } else {
-      data_zhat_miwae <- read.csv(file = paste0(data.dir, setting, "_", n, "_", p, "_", d, 
-                                                "_dmiwae", d.miwae, "_hmiwae", h.miwae, add_mask, 
+    } else if (use.wy) {
+      data_zhat_miwae <- read.csv(file = paste0(data.dir, setting, "_", link, "_", n, "_", p, "_", d, 
+                                                "_WY_dmiwae", d.miwae, "_hmiwae", h.miwae, add_mask, 
                                                 "_seed", id, 
                                                 "_propNA", format(round(perc.miss, 2), nsmall=2),
                                                 "_zhat_m",k,".csv"), 
                                   sep = ";", header=F)
+    } else {
+      try(data_zhat_miwae <- read.csv(file = paste0(data.dir, setting, "_", link, "_", n, "_", p, "_", d, 
+                                                "_dmiwae", d.miwae, "_hmiwae", h.miwae, add_mask, 
+                                                "_seed", id, 
+                                                "_propNA", format(round(perc.miss, 2), nsmall=2),
+                                                "_zhat_m",k,".csv"), 
+                                  sep = ";", header=F))
+      try(data_zhat_miwae <- read.csv(file = paste0(data.dir, setting, "_", n, "_", p, "_", d, 
+                                                "_dmiwae", d.miwae, "_hmiwae", h.miwae, add_mask, 
+                                                "_seed", id, 
+                                                "_propNA", format(round(perc.miss, 2), nsmall=2),
+                                                "_zhat_m",k,".csv"), 
+                                  sep = ";", header=F))
     }
-  }
-  if (dim(data_zhat_miwae)[2] > d){
+  # }
+  if (dim(data_zhat_miwae)[2] > d.miwae){
     data_zhat_miwae <- data_zhat_miwae[,-1]
   }
+
   ## grf mul
   if (forest == "grf"){
     Z.m = model.matrix(~. , data=data_zhat_miwae)
@@ -915,12 +1024,16 @@ ipw.grf.miwae.zmul <- rbind(ipw.grf.miwae.zmul, cbind(tt, perc.miss, id, forest)
 
 
 
-## aggregate tau estimates
+### Multiple imputation strategy: aggregate tau estimates of 
 dr.grf.miwae.agg <- rbind(dr.grf.miwae.agg, cbind(t(apply(dr.grf.agg[,1:2],2,mean)), perc.miss, id, forest))
 dr.loglin.miwae.agg <- rbind(dr.loglin.miwae.agg, cbind(t(apply(dr.loglin.agg[,1:2],2,mean)), perc.miss, id, "glm"))
 ipw.grf.miwae.agg <- rbind(ipw.grf.miwae.agg, cbind(t(apply(ipw.grf.agg[,1:3],2,mean)), perc.miss, id, forest))
 ipw.loglin.miwae.agg <- rbind(ipw.loglin.miwae.agg, cbind(t(apply(ipw.loglin.agg[,1:3],2,mean)), perc.miss, id, "glm"))
 
+
+#############################################
+# # Prepare, aggregate and save final results
+#############################################
 
 
 dr.grf.miwae.agg <- change_colnames(dr.grf.miwae.agg, dr.col.names)
@@ -934,31 +1047,7 @@ ipw.grf.miwae.zmul <- change_colnames(ipw.grf.miwae.zmul, ipw.col.names)
 ipw.loglin.miwae.zmul <- change_colnames(ipw.loglin.miwae.zmul, ipw.col.names)
 
 
-
 print(paste0("finished estimation for data set ", id))
-
-######## Plot results
-
-dr.loglin <- rbind(cbind(dr.loglin.mice.woy, method = rep("loglin.mice.woy",dim(dr.loglin.mice.woy)[1])),
-                   cbind(dr.loglin.mice.wy, method = rep("loglin.mice.wy",dim(dr.loglin.mice.wy)[1])),
-                   cbind(dr.loglin.mf, method = rep("loglin.mf",dim(dr.loglin.mf)[1])),
-                   cbind(dr.loglin.mf.cv, method = rep("loglin.mf.cv",dim(dr.loglin.mf.cv)[1])),
-                   cbind(dr.loglin.miwae, method = rep("loglin.miwae",dim(dr.loglin.miwae)[1])),
-                   cbind(dr.loglin.full, method = rep("loglin.Z_true",dim(dr.loglin.full)[1])),
-                   cbind(dr.grf.mice.woy, method = rep("grf.mice.woy",dim(dr.grf.mice.woy)[1])),
-                   cbind(dr.grf.mice.wy, method = rep("grf.mice.wy",dim(dr.grf.mice.wy)[1])),
-                   cbind(dr.grf.miwae, method = rep("grf.miwae",dim(dr.grf.miwae)[1])),
-                   cbind(dr.grf.full, method = rep("grf.Z_true",dim(dr.grf.full)[1])),
-                   cbind(dr.grf.mf, method = rep("grf.mf",dim(dr.grf.mf)[1])),
-                   cbind(dr.grf.mf.cv, method = rep("grf.mf.cv",dim(dr.grf.mf.cv)[1])),
-                   cbind(dr.grf.mia, method = rep("grf.mia",dim(dr.grf.mia)[1])))
-print(paste0("first dr rbind passed for data set ", id))
-
-try(dr.loglin <- rbind(dr.loglin, 
-                       cbind(dr.grf.cc, method = rep("grf.cc",dim(dr.grf.cc)[1])),
-                       cbind(dr.loglin.cc, method = rep("loglin.cc",dim(dr.loglin.cc)[1]))))
-
-print(paste0("second dr rbind passed for data set ", id))
 
 
 try(dr.loglin <- rbind(dr.loglin,
@@ -971,42 +1060,18 @@ try(dr.loglin <- rbind(dr.loglin,
                        cbind(data.frame(dr.loglin.miwae.agg), method = rep("loglin.miwae.agg",dim(dr.loglin.miwae.agg)[1]))))
 print(paste0("fourth dr rbind passed for data set ", id))
 
-print(dr.loglin)
-
-ipw.loglin <- rbind(cbind(data.frame(ipw.loglin.mice.woy), method = rep("loglin.mice.woy",dim(ipw.loglin.mice.woy)[1])),
-                    cbind(data.frame(ipw.loglin.mice.wy), method = rep("loglin.mice.wy",dim(ipw.loglin.mice.wy)[1])),
-                    cbind(data.frame(ipw.loglin.mf), method = rep("loglin.mf",dim(ipw.loglin.mf)[1])),
-                    cbind(data.frame(ipw.loglin.mf.cv), method = rep("loglin.mf.cv",dim(ipw.loglin.mf.cv)[1])),
-                    cbind(data.frame(ipw.loglin.miwae), method = rep("loglin.miwae",dim(ipw.loglin.miwae)[1])),
-                    cbind(data.frame(ipw.loglin.full), method = rep("loglin.Z_true",dim(ipw.loglin.full)[1])),
-                    cbind(data.frame(ipw.grf.mice.woy), method = rep("grf.mice.woy",dim(ipw.grf.mice.woy)[1])),
-                    cbind(data.frame(ipw.grf.mice.wy), method = rep("grf.mice.wy",dim(ipw.grf.mice.wy)[1])),
-                    cbind(data.frame(ipw.grf.full), method = rep("grf.Z_true",dim(ipw.grf.full)[1])),
-                    cbind(data.frame(ipw.grf.mia), method = rep("grf.mia",dim(ipw.grf.mia)[1])),
-                    cbind(data.frame(ipw.grf.miwae), method = rep("grf.miwae",dim(ipw.grf.miwae)[1])),
-                    cbind(data.frame(ipw.grf.mf), method = rep("grf.mf",dim(ipw.grf.mf)[1])),
-                    cbind(data.frame(ipw.grf.mf.cv), method = rep("grf.mf.cv",dim(ipw.grf.mf.cv)[1])))
-print(paste0("first ipw rbind passed for data set ", id))
-
-try(ipw.loglin <- rbind(ipw.loglin,
-                        cbind(data.frame(ipw.loglin.cc), method = rep("loglin.cc",dim(ipw.loglin.cc)[1])),
-                        cbind(data.frame(ipw.grf.cc), method = rep("grf.cc",dim(ipw.grf.cc)[1]))))
-
-print(paste0("second ipw rbind passed for data set ", id))
 
 try(ipw.loglin <- rbind(ipw.loglin,
                         cbind(data.frame(ipw.grf.miwae.zmul), method = rep("grf.miwae.zmul",dim(ipw.grf.miwae.zmul)[1])),
                         cbind(data.frame(ipw.loglin.miwae.zmul), method = rep("loglin.miwae.zmul",dim(ipw.loglin.miwae.zmul)[1]))))
-
 print(paste0("third ipw rbind passed for data set ", id))
 
 try(ipw.loglin <- rbind(ipw.loglin,
                         cbind(data.frame(ipw.grf.miwae.agg), method = rep("grf.miwae.agg",dim(ipw.grf.miwae.agg)[1])),
                         cbind(data.frame(ipw.loglin.miwae.agg), method = rep("loglin.miwae.agg",dim(ipw.loglin.miwae.agg)[1]))))
-
 print(paste0("fourth ipw rbind passed for data set ", id))
 
-
+### Final save results
 if (use.w){
   save(dr.loglin, ipw.loglin, file = paste0(rdata.dir, opt$out_date, 
                                           "_",link,"_",setting, 
@@ -1020,7 +1085,20 @@ if (use.w){
                                           "_forest", forest,
                                           "_results_dr_ipw_seed",id,
                                           ".RData"))
-} else {
+} else if (use.wy) {
+  save(dr.loglin, ipw.loglin, file = paste0(rdata.dir, opt$out_date, 
+                                          "_",link,"_",setting, 
+                                          "_n", n, "_p", p, "_d", d, 
+                                          "_WY_dmiwae", d.miwae, "_hmiwae", h.miwae,
+                                          "_",add_mask,
+                                          "_sir", num.samples.sir,
+                                          "_propNA", format(round(perc.miss, 2), nsmall=2),
+                                          "_cit2", as.logical(cit2),
+                                          "_ci2Imp", ci2_imp,
+                                          "_forest", forest,
+                                          "_results_dr_ipw_seed",id,
+                                          ".RData"))
+} else{
   save(dr.loglin, ipw.loglin, file = paste0(rdata.dir, opt$out_date, 
                                             "_",link,"_",setting, 
                                             "_n", n, "_p", p, "_d", d, 
@@ -1034,3 +1112,5 @@ if (use.w){
                                             "_results_dr_ipw_seed",id,
                                             ".RData"))
 }
+
+
