@@ -219,10 +219,14 @@ prepare_data_ate <- function(df, w, y, imputation.method, mi.m,
       pca_soft <- recover_pca_gaussian_cv(as.matrix(df), 1:dim(df)[2], nfolds = 3)
       df.imp <- data.frame(pca_soft$Uhat)
     } else {
-      #var.type <- sapply(data.frame(df), FUN = function(x) {if_else(is.numeric(x), "gaussian", "binomial")})
-      #df[,var.type=="binomial"] <- sapply(df[,var.type=="binomial"], as.integer)
-      #glrm_mod <- mimi::mimi(y=data.frame(df), model = "low-rank",
-      #                          var.type = var.type, max.rank = dim(df), algo="bcgd", lambda1=1)
+      var.type <- sapply(data.frame(df), FUN = function(x) {if_else(is.numeric(x), "gaussian", "binomial")})
+      df[,var.type=="binomial"] <- sapply(df[,var.type=="binomial"], as.integer)
+      lambdas <- cv.mimi(y=data.frame(df), model = "low-rank", var.type, 
+                        algo = "bcgd", 
+                        maxit = 100, max.rank = NULL, trace.it = F, parallel = F,
+                        len = 15)
+      glrm_mod <- mimi::mimi(y=data.frame(df), model = "low-rank",
+                                var.type = var.type, max.rank = dim(df), algo="bcgd", lambda1=lambdas$lambda)
       #ncomp <- missMDA::estim_ncpFAMD(df, ncp.max = dim(df)[2]-1)
     }
   }

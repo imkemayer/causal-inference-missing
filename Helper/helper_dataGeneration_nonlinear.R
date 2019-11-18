@@ -1,4 +1,3 @@
-
 # corresponding to latent class setting
 gen_treat_lat <- function(x, class.interaction = FALSE, link = "nonlinear"){
   if (link == "nonlinear"){
@@ -921,6 +920,140 @@ gen_dlvm2 <- function(n, p, d=3, h = 5,
 		} 
   }
 
+  y <- apply(cbind(codes, treat), MARGIN=1, FUN = function(x) gen_out_deep(x, sd=sd, link = link))
+  
+  
+  y.1 <- apply(cbind(codes, rep(1, n)), MARGIN=1, FUN = function(x) gen_out_deep(x, sd=sd, link = link))
+  y.0 <- apply(cbind(codes, rep(0, n)), MARGIN=1, FUN = function(x) gen_out_deep(x, sd=sd, link = link))
+  
+  tau <- y.1 - y.0
+  
+  codes <- old_codes
+  return(list("X" = X,
+              "ps" = ps,
+              "treat" = treat,
+              "y" = y,
+              "X.incomp" = X.incomp,
+              "tau" = tau,
+              "class" = codes))
+}
+
+gen_dlvm3 <- function(n, p, d=3, h = 5,
+         sd=0.1, 
+         seed = 0,
+         mechanism=FALSE, prop.missing = 0, 
+         cit = FALSE, cio = FALSE,
+         link = "nonlinear",
+         sigma.structure = "diagonal"){
+  set.seed(0)
+  gamma.mar.x <- (20/p)*(runif(n=floor(p/2))-0.5)
+  
+  
+  V <- mvrnorm(n=h, mu= rep(1,h), Sigma = diag(h))
+  W <- matrix(runif(n = h*d), ncol = d, nrow = h)
+  a <- runif(n=h)
+  b <- rnorm(n=h)
+  
+  V1 <- mvrnorm(n=p, mu= rep(1,h), Sigma = diag(h))
+  W1 <- matrix(runif(n = h*d), ncol = d, nrow = h)
+  a1 <- runif(n=h)
+  b1 <- rnorm(n=p)
+  
+  if (sigma.structure == "diagonal"){
+    alpha <-matrix(runif(n = h*h), ncol = h, nrow = h)
+    beta <- runif(n = h)
+    
+    alpha1 <- rnorm(n = h)
+    beta1 <- runif(n = 1)
+    
+  } else {
+    alpha <- mvrnorm(n = p, mu = rep(0,h), Sigma = diag(h))
+    beta <- runif(n = p)
+    U <- randortho(n = p, type="orthonormal")
+  }
+  set.seed(seed)
+  
+  get_params <- function(z){
+    hu<-W%*%z + a
+    
+    if (sigma.structure == "diagonal"){
+      mu <- V1%*%tanh(V%*%tanh(hu) + b)+b1
+      
+        sig <- as.numeric(exp(  
+        t(alpha1)%*%tanh(alpha %*%tanh(hu) + beta) + beta1)  )
+      
+       Sigma <- sig*diag(p)
+      
+      
+      
+    } else {
+      mu <- U%*%(V%*%tanh(hu) + b)
+      Sigma <- U%*%diag(array(exp(alpha%*%tanh(hu) + beta)), nrow = p)%*%t(U)
+    }
+    return(list(mu=mu, Sigma = Sigma))
+  }
+  
+  
+  codes <- mvrnorm(n=n, mu = rep(0, d), Sigma = diag(d))
+  
+  params <- apply(codes, FUN = get_params, MARGIN = 1)
+  
+  X.list <- lapply(params, FUN = function(eta) mvrnorm(n=1, mu = eta$mu, Sigma = eta$Sigma))
+  X <- do.call(rbind, X.list)
+  
+  X <- data.frame(X)
+  
+  # MISSING DATA
+  X.incomp <- X
+  idx_NA <- NULL
+  if (mechanism == "MCAR"){
+    idx_NA = matrix(runif(n*dim(X)[2]), nrow=n, ncol=dim(X)[2]) <= prop.missing
+    idx_NA[rowSums(idx_NA)==ncol(X), sample(ncol(X),1)] = FALSE # avoid having empty observations
+    X.incomp[idx_NA] <- NA
+  }
+  if (mechanism == "MAR"){
+    idx_NA <- c()
+    for (j in 1:ceiling(p/2)) {
+      m <- sapply(expit(2 + X[,(ceiling(p/2)+1):p]%*%gamma.mar.x), FUN= function(pr) rbinom(n=1, size=1, prob = pr))
+      X.incomp[which(m==1), j] <- NA
+      idx_NA <- cbind(idx_NA, m==1)
+    }
+    idx_NA <- cbind(idx_NA, matrix(FALSE, nrow = n, ncol = floor(p/2)))
+    idx_NA <- matrix(idx_NA, nrow=n, ncol = p)
+    
+  } 
+  if (mechanism == "MNAR"){
+    idx_NA <- c()
+    for (j in 1:ceiling(p/2)) {
+      if (prop.missing > 0.4 & prop.missing < 0.6){
+        m <- (mod(j,2)==0)*(X[,j]<median(X[,j])) + (mod(j,2)==1)*(X[,j]>median(X[,j]))
+      } else {
+        m <- (mod(j,2)==0)*(X[,j]<quantile(X[,j], prop.missing)) + (mod(j,2)==1)*(X[,j]>quantile(X[,j], 1-prop.missing))
+      }
+      X.incomp[which(m==1), j] <- NA
+      idx_NA <- cbind(idx_NA, m==1)
+    }
+    idx_NA <- cbind(idx_NA, matrix(FALSE, nrow = n, ncol = floor(p/2)))
+    idx_NA <- matrix(idx_NA, nrow=n, ncol = p)
+  }
+  
+  # TREATMENT ASSIGNMENT
+  
+  assignment <- apply(codes, MARGIN=1, FUN = function(x) gen_treat_deep(x, link = link))
+  ps <- assignment[1,]
+  treat <- assignment[2,]
+  
+  old_codes <- codes
+  if (link == "nonlinear3"){
+    for (j in 1:dim(codes)[2]){
+      codes[,j] <- (mod(j,5)==1)*((codes[,j]<quantile(codes[,j],0.7)) + (codes[,j]> quantile(codes[,j],0.2))) +
+        (mod(j,5)==2)*(1/(0.001+exp(codes[,j]*codes[,1]))) +
+        (mod(j,5)==3)*(-(codes[,j])*(codes[,2]>0)) +
+        (mod(j,5)==4)*(-2.5*sqrt(abs(codes[,j]))) +
+        (mod(j,5)==0)*(codes[,3]*codes[,j])
+    } 
+  }
+  
   y <- apply(cbind(codes, treat), MARGIN=1, FUN = function(x) gen_out_deep(x, sd=sd, link = link))
   
   
