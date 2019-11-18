@@ -1,7 +1,7 @@
 ---
 title: "Prepare and save data for Treatment Effect of Tranexamic Acid on TBI patients"
 author: "Imke Mayer"
-date: "07/31/2019"
+date: "08/29/2019"
 output: 
   html_document:
     toc: true
@@ -14,7 +14,7 @@ output:
 knitr::opts_chunk$set(echo = TRUE, cache= FALSE)
 ```
 
-**Same as 2019-06-06_PrepareDataForATE.Rmd except for adding `Remplissage.total.cristalloides` and `Remplissage.total.colloides` as confounders.**
+**Same as 2019-07-31_PrepareDataForATE.Rmd except for adding `HTIC`.**
 
 
 **We use the following set of confounders in this analysis: `Trauma.Center`, `PAS.min, PAD.min, FC.max`, `Choc.index` (`FC.max`/`PAS.min`), `ACR.1`, `Catecholamines`, `Hemocue.ph`, `Hemoglobine.ph`, `Delta.hemocue`, `Delta.choc.index`, `AIS.externe`, `Remplissage.total.cristalloides` and `Remplissage.total.colloides`.**
@@ -73,7 +73,7 @@ selectedData <- rawData[, c("Traitement.anticoagulant", "Traitement.antiagregant
                             "Temps.lieux.hop",
                             "Anomalie.pupillaire" , 
                             "FC", "PAS", "PAD", "SpO2", "DTC.IP.max", "Ventilation.FiO2", "Hb",
-                            "Choc.hemorragique",
+                            "Choc.hemorragique", "HTIC",
                             "Trauma.cranien","AIS.tete","AIS.face", "AIS.externe", "ISS.2", "IGS.II",
                             "Bloc.J0.neurochirurgie", "Osmotherapie", "PIC", "DVE", "Craniectomie.decompressive", "Acide.tranexamique", "Acide.tranexamique.choc.hemorragique","DC.en.rea","Cause.du.DC","Glasgow.sortie",
                             "Remplissage.total.cristalloides", "Remplissage.total.colloides")]
@@ -81,7 +81,7 @@ selectedData <- rawData[, c("Traitement.anticoagulant", "Traitement.antiagregant
 # We will keep the center information for the exploration step
 selectedData$Trauma.Center <- rawData$Centre
 
-selectedData$Delta.hemocue <- rawData$Hemocue.init - rawData$Hemocue.arrivee.hop
+selectedData$Delta.hemocue <- as.numeric(rawData$Hemocue.arrivee.hop) - as.numeric(rawData$Hemocue.init)
 ```
 
 ### Pre-process the data (eliminate erronous cases, recode some covariates)
@@ -118,7 +118,7 @@ features_to_recode_1 <- c("Traitement.anticoagulant", "Traitement.antiagregants"
                         "Regression.mydriase.sous.osmotherapie",
                         "Catecholamines", "Ventilation.FiO2", "IOT.SMUR",
                         "KTV.poses.avant.TDM", "Choc.hemorragique",
-                        "Cause.du.DC", "ACR.1",
+                        "Cause.du.DC", "ACR.1", "HTIC",
                         "DC.en.rea","Trauma.cranien", "PIC", "DVE", "Hypothermie.therapeutique", "Craniectomie.decompressive", "Acide.tranexamique", "Acide.tranexamique.choc.hemorragique", "Bloc.J0.neurochirurgie",
                         "Trauma.Center")
 
@@ -268,9 +268,9 @@ missing.data <- as.data.frame(cbind(variable.names, null.data), stringsAsFactors
 missing.data[-1] <- apply(missing.data[-1], 1:2, function(x) as.numeric(as.character(x)))
 rownames(missing.data) <- NULL
 
-missing.data.reshaped <- melt(missing.data, id.var="variable.names")
+missing.data.reshaped <- data.table::melt(missing.data, id.var="variable.names")
 
-ggplot(missing.data.reshaped, aes(x = reorder(variable.names, value), y = (100 * value / dims[1]), fill = variable)) + 
+ggplot2::ggplot(missing.data.reshaped, aes(x = reorder(variable.names, value), y = (100 * value / dims[1]), fill = variable)) + 
   geom_bar(stat = "identity") + theme(axis.text.x= element_text(angle=65,hjust=1, size=6)) + xlab("Variable") + ylab("Percentage") + ggtitle("Percentage of missing values") 
 ```
 
@@ -298,7 +298,7 @@ selectedData[selectedData$DC.en.rea %in% c("0"),"Cause.du.DC"] <- "Survived"
 
 We also make these assumptions:
 
-4) When there are missing values for any of these procedures done in the hospital, they are assumed not to have been done (as per the doctors' recommendation): `Catecholamines`, `KTV.poses.avant.TDM`, `Dose.NAD.depart`, `Osmotherapie`, `PIC`, `DVE`,  `Hypothermie.therapeutique`, `Craniectomie.decompressive`, `Acide.tranexamique`, `Bloc.J0.neurochirurgie`. Adding also `Remplissage.total.cristalloides` and `Remplissage.total.colloides`.
+4) When there are missing values for any of these procedures done in the hospital, they are assumed not to have been done (as per the doctors' recommendation): `Catecholamines`, `KTV.poses.avant.TDM`, `Dose.NAD.depart`, `Osmotherapie`, `PIC`, `DVE`,  `Hypothermie.therapeutique`, `Craniectomie.decompressive`, `Acide.tranexamique`, `Bloc.J0.neurochirurgie`. 
 ```{r}
 recode_NoTrauma <- function(f, feature_name){
   if (feature_name %in% colnames(f)){
@@ -314,7 +314,7 @@ recode_NoTrauma <- function(f, feature_name){
   return(f)
 }
 
-features_to_recode_3 <- c("Catecholamines", "KTV.poses.avant.TDM", "Dose.NAD.depart", "Osmotherapie", "PIC", "DVE", "Hypothermie.therapeutique", "Craniectomie.decompressive", "Acide.tranexamique", "Bloc.J0.neurochirurgie","Remplissage.total.cristalloides","Remplissage.total.colloides")
+features_to_recode_3 <- c("Catecholamines", "KTV.poses.avant.TDM", "Dose.NAD.depart", "Osmotherapie", "PIC", "DVE", "Hypothermie.therapeutique", "Craniectomie.decompressive", "Acide.tranexamique", "Bloc.J0.neurochirurgie")
 
 for (i in features_to_recode_3){
   selectedData <- recode_NoTrauma(selectedData, i)
@@ -342,7 +342,7 @@ missing.data <- as.data.frame(cbind(variable.names, null.data), stringsAsFactors
 missing.data[-1] <- apply(missing.data[-1], 1:2, function(x) as.numeric(as.character(x)))
 rownames(missing.data) <- NULL
 
-missing.data.reshaped <- melt(missing.data, id.var="variable.names")
+missing.data.reshaped <- data.table::melt(missing.data, id.var="variable.names")
 
 ggplot(missing.data.reshaped, aes(x = reorder(variable.names, value), y = (100 * value / dims[1]), fill = variable)) + 
   geom_bar(stat = "identity") + theme(axis.text.x= element_text(angle=65,hjust=1, size=6)) + xlab("Variable") + ylab("Percentage") + 
@@ -605,7 +605,7 @@ missing.data <- as.data.frame(cbind(variable.names, null.data), stringsAsFactors
 missing.data[-1] <- apply(missing.data[-1], 1:2, function(x) as.numeric(as.character(x)))
 rownames(missing.data) <- NULL
 
-missing.data.reshaped <- melt(missing.data, id.var="variable.names")
+missing.data.reshaped <- data.table::melt(missing.data, id.var="variable.names")
 
 ggplot(missing.data.reshaped, aes(x = reorder(variable.names, value), y = (100 * value / dims[1]), fill = variable)) + 
   geom_bar(stat = "identity") + theme(axis.text.x= element_text(angle=65,hjust=1, size=6), plot.title = element_text(size=10)) + xlab("Variable") + ylab("Percentage") + 
@@ -644,8 +644,8 @@ data_indTBI <- data_indAll %>%
 
 # Save the data
 ```{r save_data_for_ate}
-write.csv(data_indAll, file="~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/Data/2019-07-31_data_preprocessed_all_individuals.csv")
-write.csv(data_indTBI, file="~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/Data/2019-07-31_data_preprocessed_tbi_individuals.csv")
+write.csv(data_indAll, file="~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/Data/2019-08-29_data_preprocessed_all_individuals.csv")
+write.csv(data_indTBI, file="~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/Data/2019-08-29_data_preprocessed_tbi_individuals.csv")
 ```
 
 # Appendix: Plot missingness patterns
@@ -657,11 +657,11 @@ library(FactoMineR)
 resMCA <- MCA(mis.ind)
 plot.resMCA <- plot.MCA(resMCA)
 
-pdf("~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/2019-07-31_mca_ind_before.pdf") 
+pdf("~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/2019-08-29_mca_ind_before.pdf") 
 plot(resMCA,invisible=c("var","quali.sup","quanti.sup"),cex=0.7)
 dev.off()
 
-pdf("~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/2019-07-31_mca_var_before.pdf")
+pdf("~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/2019-08-29_mca_var_before.pdf")
 plot(resMCA,invisible=c("ind","quali.sup","quanti.sup"),
      selectMod = "contrib 10",
      select = "contrib 3", #c("Mannitol.SSH_m","IOT.SMUR_m", "Regression.mydriase.sous.osmotherapie_m", "Mydriase_m", "ACR.1_m", "Glasgow.initial_m", "PAS_m", "PAD_m", "FC_m", "SpO2_m", "Delta.shock.index_m", "Shock.index.ph_m"),
@@ -670,7 +670,7 @@ plot(resMCA,invisible=c("ind","quali.sup","quanti.sup"),
      cex=0.9)
 dev.off()
 
-pdf("~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/2019-07-31_mca_mixed_before.pdf")
+pdf("~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/2019-08-29_mca_mixed_before.pdf")
 plot(resMCA,invisible=c("quali.sup","quanti.sup"),cex=0.8)
 dev.off()
 
@@ -685,7 +685,7 @@ ggplot(selectedData,
            legend.text = element_text(size=15,face="bold"),
            legend.title = element_blank())
 
-ggsave("~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/2019-07-31_shock_hemocue_before.pdf", plot = last_plot())
+ggsave("~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/2019-08-29_shock_hemocue_before.pdf", plot = last_plot())
 ```
 
 ```{r plot_NAs_after_preprocessing}
@@ -695,11 +695,11 @@ dimnames(mis.ind) <- dimnames(data_indAll)
 library(FactoMineR)
 resMCA <- MCA(mis.ind)
 
-pdf("~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/2019-07-31_mca_ind_after.pdf") 
+pdf("~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/2019-08-29_mca_ind_after.pdf") 
 plot(resMCA,invisible=c("var","quali.sup","quanti.sup"),  cex=0.7)
 dev.off()
 
-pdf("~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/2019-07-31_mca_var_after.pdf")
+pdf("~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/2019-08-29_mca_var_after.pdf")
 plot(resMCA,invisible=c("ind","quali.sup","quanti.sup"),
      selectMod = "contrib 9",
      select = "contrib 2", #c("Mannitol.SSH_m","IOT.SMUR_m", "Regression.mydriase.sous.osmotherapie_m", "Mydriase_m", "ACR.1_m", "Glasgow.initial_m", "PAS_m", "PAD_m", "FC_m", "SpO2_m", "Delta.shock.index_m", "Shock.index.ph_m"),
@@ -708,7 +708,7 @@ plot(resMCA,invisible=c("ind","quali.sup","quanti.sup"),
      cex=0.9)
 dev.off()
 
-pdf("~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/2019-07-31_mca_mixed_after.pdf")
+pdf("~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/2019-08-29_mca_mixed_after.pdf")
 plot(resMCA,invisible=c("quali.sup","quanti.sup"),cex=0.8)
 dev.off()
 
@@ -723,7 +723,7 @@ ggplot(data_indAll,
            legend.text = element_text(size=15,face="bold"),
            legend.title = element_blank())
 
-ggsave("~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/2019-07-31_shock_hemocue_after.pdf", plot = last_plot())
+ggsave("~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/2019-08-29_shock_hemocue_after.pdf", plot = last_plot())
 
 
 ```
