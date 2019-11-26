@@ -35,6 +35,48 @@ get_imputeMean <- function(df, args_list = NULL){
   return(df_imp)
 }
 
+get_imputeMeanNA <- function(df, args_list = NULL){
+  # impute continuous variables with their mean 
+  # and categorical and integer variables with a category/value outside of the observed range
+  
+  df_imp <- df
+  vars_real <- colnames(df)[sapply(df, is.numeric) & !sapply(df, is.integer)]
+  vars_int <- colnames(df)[sapply(df, is.integer)]
+  vars_factor <- colnames(df)[!sapply(df, is.numeric)]
+  
+  if (length(vars_real) >0){
+    if (length(vars_real)>1){
+      mean_real <- sapply(df[,vars_real], mean, na.rm=T)
+    } else {
+      mean_real <- c(mean(df[,vars_real], na.rm=T))
+    }
+    df_imp[ , vars_real] <- sapply(1:length(vars_real), 
+                                   function(x) ifelse(is.na(df_imp[,vars_real[x]]), mean_real[x], df_imp[,vars_real[x]]))
+  }
+  
+  if (length(vars_int) > 0 ){
+    # in order to have a variable outside of the observed range,
+    # we impute missing values with the sum of the absolute values of
+    # all observed values
+    val_int <- as.vector(apply(data.frame(df[, vars_int]), MARGIN=2,
+                               FUN = function(x) sum(abs(unique(x)), na.rm=T)))
+    df_imp[ , vars_int] <- sapply(1:length(vars_int), 
+                                  function(x) ifelse(is.na(df_imp[,vars_int[x]]), val_int[x], df_imp[,vars_int[x]]))
+  }
+  
+  if (length(vars_factor) > 0 ){
+    tt <- apply(df_imp[ , vars_factor], 2, as.factor)
+    tt <- sapply(1:length(vars_factor), 
+                                     function(x) ifelse(is.na(tt[,vars_factor[x]]), "NA", as.character(tt[,vars_factor[x]])))
+    df_imp[ , vars_factor] <- tt
+    for (i in 1:length(vars_factor)){
+      df_imp[,vars_factor[i]] <- as.factor(df_imp[,vars_factor[i]])
+      #levels(df_imp[,vars_factor[i]]) <- levels(df[,vars_factor[i]])
+    }
+  }
+  return(df_imp)
+}
+
 # Mean imputation with noise
 get_imputeNoisyMean <- function(df){
   imputedData <- df

@@ -154,9 +154,12 @@ prepare_data_ate <- function(df, w, y, imputation.method, mi.m,
                              mask,
                              use.outcome, use.interaction){ 
   df.imp <- fitted <- NULL                                      
-  if (tolower(imputation.method) %in% c("mean", "mean.grf", "mean.grf.ate")){
+  if (tolower(imputation.method) %in% c("mean")){
     df.imp <- get_imputeMean(data.frame(df))
   } 
+  if (tolower(imputation.method) %in% c("mean.grf", "mean.grf.ate")){
+    df.imp <- get_imputeMeanNA(data.frame(df))
+  }
   if (tolower(imputation.method) =="pca"){
     if (use.outcome){
       df.imp <- data.frame(df)
