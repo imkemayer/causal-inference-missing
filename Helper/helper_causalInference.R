@@ -190,16 +190,17 @@ ipw <- function(X, outcome, treat,
   }
   
   # Compute weights depending on the estimand
+  W <- as.integer(as.character(treat))
   if (target == "all"){
-    fitted$weight <- (treat)/fitted$pscore + (1 - treat)/ (1 - fitted$pscore)
+    fitted$weight <- (W)/fitted$pscore + (1 - W)/ (1 - fitted$pscore)
   } else if (target == "treated") {
-    fitted$weight <- treat + (1-treat)*fitted$pscore / (1 - fitted$pscore)
+    fitted$weight <- W + (1-W)*fitted$pscore / (1 - fitted$pscore)
   } else if (target == "control") {
-    fitted$weight <- treat * (1 - fitted$pscore) / fitted$pscore + (1-treat)
+    fitted$weight <- W * (1 - fitted$pscore) / fitted$pscore + (1-W)
   } else if (target == "overlap") {
-    fitted$weight <- treat * (1 - fitted$pscore) + (1-treat)*fitted$pscore
+    fitted$weight <- W * (1 - fitted$pscore) + (1-W)*fitted$pscore
   } else if (target == "matching") {
-    fitted$weight <- treat * apply(cbind(fitted$pscore, 1-fitted$pscore), 1, min) / fitted$pscore + 
+    fitted$weight <- W * apply(cbind(fitted$pscore, 1-fitted$pscore), 1, min) / fitted$pscore + 
                       (1-fitted$treated)* apply(cbind(fitted$pscore, 1-fitted$pscore), 1, min) / (1-fitted$pscore)
   }
   
@@ -216,13 +217,14 @@ ipw <- function(X, outcome, treat,
   
   
   # Compute HT verion of IPW
-  ipw1 <- 1/length(outcome)*(sum(outcome[which(treat==1)]*fitted$weight[which(treat==1)]) - sum(outcome[which(!(treat==1))]*fitted$weight[which(!(treat==1))]))
+  Y <- as.double(as.character(outcome))
+  ipw1 <- 1/length(Y)*(sum(Y[which(W==1)]*fitted$weight[which(W==1)]) - sum(Y[which(!(W==1))]*fitted$weight[which(!(W==1))]))
   
   # Compute normalized version of IPW
-  ipw2 <- 1/sum(fitted$weight[which(treat==1)]) * sum(outcome[which(treat==1)] * fitted$weight[which(treat==1)]) - 1/sum(fitted$weight[which(!(treat==1))]) * sum(outcome[which(!(treat==1))] * fitted$weight[which(!(treat==1))])
+  ipw2 <- 1/sum(fitted$weight[which(W==1)]) * sum(Y[which(W==1)] * fitted$weight[which(W==1)]) - 1/sum(fitted$weight[which(!(W==1))]) * sum(Y[which(!(W==1))] * fitted$weight[which(!(W==1))])
   
   #if (ps.method == "glm"){
-    mod <- lm(outcome~treat, weights = fitted$weight)
+    mod <- lm(Y~treat, weights = fitted$weight)
     se.ipw2 <- sqrt(diag(sandwich::vcovHC(mod, type = "HC")))[2]
   #} else {
     #se.ipw2 <- mean((outcome[which(treat==1)] - 1/sum(fitted$weight[which(treat==1)]) * sum(outcome[which(treat==1)] * fitted$weight[which(treat==1)]))^2 * fitted$weight[which(treat==1)] 
@@ -255,7 +257,8 @@ dr <- function(X,
                mask = NULL,
                mask.for.prop = NULL,
                mask.for.outcome = NULL,
-               use.interaction = FALSE){
+               use.interaction = FALSE,
+               subset = NULL){
 
   #' @param X [data.frame] confounders \eqn{n \times p}{n * p}
   #' @param X.for.ps [data.frame] confounders and other predictors of treatment assignment \eqn{n \times (p + p_p)}{n * (p+pp)}
@@ -334,19 +337,22 @@ dr <- function(X,
   }
 
   # Compute weights depending on the estimand
+  W <- as.integer(as.character(treat))
   if (!is.null(fitted)){
     if (target == "all"){
-      fitted$weight <- (treat)/fitted$pscore + (1 - treat)/ (1 - fitted$pscore)
+      fitted$weight <- (W)/fitted$pscore + (1 - W)/ (1 - fitted$pscore)
     } else if (target == "treated") {
-      fitted$weight <- treat + (1-treat)*fitted$pscore / (1 - fitted$pscore)
+      fitted$weight <- W + (1-W)*fitted$pscore / (1 - fitted$pscore)
     } else if (target == "control") {
-      fitted$weight <- treat* (1 - fitted$pscore) / fitted$pscore + (1-treat)
+      fitted$weight <- W* (1 - fitted$pscore) / fitted$pscore + (1-W)
     } else if (target == "overlap") {
-      fitted$weight <- treat * (1 - fitted$pscore) + (1-treat)*fitted$pscore
+      fitted$weight <- W * (1 - fitted$pscore) + (1-W)*fitted$pscore
     } else if (target == "matching") {
-      fitted$weight <- treat * apply(cbind(fitted$pscore, 1-fitted$pscore), 1, min) / fitted$pscore + (1-fitted$treated)* apply(cbind(fitted$pscore, 1-fitted$pscore), 1, min) / (1-fitted$pscore)
+      fitted$weight <- W * apply(cbind(fitted$pscore, 1-fitted$pscore), 1, min) / fitted$pscore + (1-fitted$treated)* apply(cbind(fitted$pscore, 1-fitted$pscore), 1, min) / (1-fitted$pscore)
     }
-    
+  }
+  
+  if (!is.null(fitted) & (any(is.nan(fitted$weight)) | any(is.infinite(fitted$weight)))) {
     # Trim the weights (default: no trimming)
     weightMax <- quantile(fitted$weight, c(trimming_weight), na.rm=TRUE) 
     fitted[is.na(fitted$weight) ,"weight"] <- weightMax # If the weight is NA this means that pscore was 0
@@ -404,11 +410,19 @@ dr <- function(X,
     forest.0.Y = regression_forest(X.0.m, outcome[which(treat==0)], tune.parameters = TRUE)
     y_0.hat = predict(forest.0.Y, X.m)$predictions
     
+    if (!is.null(subset)){
+      X2 <- X2[subset,]
+      y_1.hat <- y_1.hat[subset]
+      y_0.hat <- y_0.hat[subset]
+      treat <- treat[subset]
+      outcome <- outcome[subset]
+      W.hat <- W.hat[subset]
+    } 
     n.sample <- dim(X2)[1]
     delta_i <- y_1.hat -  y_0.hat + treat*(outcome-y_1.hat)*W.hat - (1-treat)*(outcome-y_0.hat)*W.hat
     treatment_effect_dr <- mean(delta_i)
     treatment_effect_dr <- c(treatment_effect_dr, sqrt(sum((delta_i-treatment_effect_dr)^2))/n.sample)
-  
+
   } 
 
   # Use grf's average_treatment_effect function
@@ -423,7 +437,7 @@ dr <- function(X,
     X.m <- model.matrix(~. , data=X1) # X1 corresponds to confounders
     tau.forest = causal_forest(X.m, outcome, treat, Y.hat = y.hat)
   
-    treatment_effect_dr <- average_treatment_effect(tau.forest, target.sample = target)
+    treatment_effect_dr <- average_treatment_effect(tau.forest, target.sample = target, subset = subset)
     
   } 
 
@@ -641,7 +655,14 @@ dr <- function(X,
       y_0.hat <- as.matrix(X2.control, ncol=dim(X2.control)[2])%*%beta_control[2:(dim(X2.control)[2]+1)] + beta_control[1]
     }
     
-     
+    if (!is.null(subset)){
+      X <- X[subset,]
+      y_1.hat <- y_1.hat[subset]
+      y_0.hat <- y_0.hat[subset]
+      treat <- treat[subset]
+      outcome <- outcome[subset]
+      W.hat <- W.hat[subset]
+    }
     n.sample <- dim(X)[1]
     delta_i <- y_1.hat -  y_0.hat + treat*(outcome-y_1.hat)*W.hat - (1-treat)*(outcome-y_0.hat)*W.hat
     treatment_effect_dr <- mean(delta_i)
