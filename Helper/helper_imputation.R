@@ -37,11 +37,12 @@ get_imputeMean <- function(df, args_list = NULL){
 
 get_imputeMeanNA <- function(df, args_list = NULL){
   # impute continuous variables with their mean 
-  # and categorical and integer variables with a category/value outside of the observed range
+  # and categorical variables with a category/value outside of the observed range
   
   df_imp <- df
-  vars_real <- colnames(df)[sapply(df, is.numeric) & !sapply(df, is.integer)]
-  vars_int <- colnames(df)[sapply(df, is.integer)]
+  # vars_real <- colnames(df)[sapply(df, is.numeric) & !sapply(df, is.integer)]
+  # vars_int <- colnames(df)[sapply(df, is.integer)]
+  vars_real <- colnames(df)[sapply(df, is.numeric)]
   vars_factor <- colnames(df)[!sapply(df, is.numeric)]
   
   if (length(vars_real) >0){
@@ -54,15 +55,15 @@ get_imputeMeanNA <- function(df, args_list = NULL){
                                    function(x) ifelse(is.na(df_imp[,vars_real[x]]), mean_real[x], df_imp[,vars_real[x]]))
   }
   
-  if (length(vars_int) > 0 ){
-    # in order to have a variable outside of the observed range,
-    # we impute missing values with the sum of the absolute values of
-    # all observed values
-    val_int <- as.vector(apply(data.frame(df[, vars_int]), MARGIN=2,
-                               FUN = function(x) sum(abs(unique(x)), na.rm=T)))
-    df_imp[ , vars_int] <- sapply(1:length(vars_int), 
-                                  function(x) ifelse(is.na(df_imp[,vars_int[x]]), val_int[x], df_imp[,vars_int[x]]))
-  }
+  # if (length(vars_int) > 0 ){
+  #   # in order to have a variable outside of the observed range,
+  #   # we impute missing values with the sum of the absolute values of
+  #   # all observed values
+  #   val_int <- as.vector(apply(data.frame(df[, vars_int]), MARGIN=2,
+  #                              FUN = function(x) sum(abs(unique(x)), na.rm=T)))
+  #   df_imp[ , vars_int] <- sapply(1:length(vars_int), 
+  #                                 function(x) ifelse(is.na(df_imp[,vars_int[x]]), val_int[x], df_imp[,vars_int[x]]))
+  # }
   
   if (length(vars_factor) > 0 ){
     tt <- apply(df_imp[ , vars_factor], 2, as.factor)
