@@ -101,7 +101,7 @@ predict_grf <- function(X, treat, seed){
     treat = as.integer(treat)
   }
   
-  forest.W = regression_forest(X.m, treat, tune.parameters = TRUE)
+  forest.W = regression_forest(X.m, treat, tune.parameters = "all")
   pred = predict(forest.W)$predictions
   fitted = as.data.frame(pred)
   colnames(fitted) <- c("pscore")
@@ -404,10 +404,10 @@ dr <- function(X,
     X.m = model.matrix(~. -1, data=X2, 
                        contrasts = as.list(setNames(rep("contr.sum", length(var.factor)), var.factor)))
     
-    forest.1.Y = regression_forest(X.1.m, outcome[which(treat==1)], tune.parameters = TRUE)
+    forest.1.Y = regression_forest(X.1.m, outcome[which(treat==1)], tune.parameters = "all")
     y_1.hat = predict(forest.1.Y, X.m)$predictions
     
-    forest.0.Y = regression_forest(X.0.m, outcome[which(treat==0)], tune.parameters = TRUE)
+    forest.0.Y = regression_forest(X.0.m, outcome[which(treat==0)], tune.parameters = "all")
     y_0.hat = predict(forest.0.Y, X.m)$predictions
     
     if (!is.null(subset)){
@@ -430,7 +430,7 @@ dr <- function(X,
     y.hat <- NULL
     if (!is.null(X.for.outcome)) {
       X.m = model.matrix(~. , data=X2)
-      forest.Y = regression_forest(X.m, outcome, tune.parameters = TRUE)
+      forest.Y = regression_forest(X.m, outcome, tune.parameters = "all")
       y.hat = predict(forest.Y, X.m)$predictions
     }
     
