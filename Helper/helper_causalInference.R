@@ -262,7 +262,7 @@ dr <- function(X,
                fitted=NULL,
                out.method = "glm",
                mask = NULL,
-               mask.for.prop = NULL,
+               mask.for.ps = NULL,
                mask.for.outcome = NULL,
                use.interaction = FALSE,
                subset = NULL){
