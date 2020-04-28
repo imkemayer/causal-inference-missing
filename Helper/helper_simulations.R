@@ -251,7 +251,8 @@ ipw_estimation_miss <- function(N, n, p, r, sd = 0.1,
                                 use.interaction = FALSE,
                                 use.mask = FALSE,
                                 lib_path = NULL,
-                                local = TRUE){
+                                local = TRUE,
+                                new.mia = FALSE){
   results <- data.frame("ipw1_true" = rep(NA, N), "ipw2_true" = rep(NA,N))
   
   if (trimming_weight == 1) {
@@ -354,6 +355,11 @@ ipw_estimation_miss <- function(N, n, p, r, sd = 0.1,
     try(X.imp <- tmp$df.imp)
     try(fitted <- tmp$fitted)
     
+    if (new.mia & imputation.method %in% c("mia.grf", "mia.grf.ate")){
+      X.imp <- sample$X.incomp
+      fitted <- NULL
+    }
+    
     if (mi.m == 1){
       try(results[i,] <- ipw(X = X.imp,
                          outcome = sample$y, 
@@ -440,7 +446,8 @@ dr_estimation_miss <- function(N, n, p, r, sd = 0.1,
                                use.interaction = FALSE,
                                use.mask = FALSE,
                                lib_path = NULL,
-                               local = TRUE){
+                               local = TRUE,
+                               new.mia = FALSE){
   results <- data.frame("dr_true_true" = rep(NA, N), "se" = rep(NA,N))
   
   if (trimming_weight == 1) {
@@ -544,6 +551,12 @@ dr_estimation_miss <- function(N, n, p, r, sd = 0.1,
     try(X.imp <- tmp$df.imp)
     try(fitted <- tmp$fitted)
     
+    if (new.mia & imputation.method %in% c("mia.grf", "mia.grf.ate")){
+      X.imp <- sample$X.incomp
+      fitted <- NULL
+    }
+    
+  
     if (mi.m == 1){
       try(results[i, ] <- dr(X = X.imp,
                          outcome = sample$y, 
@@ -629,7 +642,8 @@ ate_estimation_miss <- function(N, n, p, r,
                                 cit = FALSE, cio = FALSE,
                                 use.interaction = FALSE,
                                 lib_path = NULL,
-                                local = TRUE){
+                                local = TRUE,
+                                new.mia = FALSE){
   results_dr_miss <- c()
   results_ipw_miss <- c()
   for (imp in imputation.methods){
@@ -656,7 +670,8 @@ ate_estimation_miss <- function(N, n, p, r,
                                                     cit = cit, cio = cio, 
                                                     use.interaction = use.interaction,
                                                     lib_path = lib_path,
-                                                    local = local)))
+                                                    local = local,
+                                                    new.mia = new.mia)))
         
         try(results_ipw_miss <- rbind(results_ipw_miss,
                                   ipw_estimation_miss(N, n, p, r, 
@@ -672,7 +687,8 @@ ate_estimation_miss <- function(N, n, p, r,
                                                       cit = cit, cio = cio, 
                                                       use.interaction = use.interaction,
                                                       lib_path = lib_path,
-                                                      local = local)))
+                                                      local = local,
+                                                      new.mia = new.mia)))
       }
     }
     
@@ -691,7 +707,8 @@ ate_estimation_miss <- function(N, n, p, r,
                                                   cit = cit, cio = cio, 
                                                   use.interaction = use.interaction,
                                                   lib_path = lib_path,
-                                                  local = local)))
+                                                  local = local,
+                                                  new.mia = new.mia)))
       
       try(results_ipw_miss <- rbind(results_ipw_miss,
                                 ipw_estimation_miss(N, n, p, r, 
@@ -707,7 +724,8 @@ ate_estimation_miss <- function(N, n, p, r,
                                                     cit = cit, cio = cio, 
                                                     use.interaction = use.interaction,
                                                     lib_path = lib_path,
-                                                    local = local)))
+                                                    local = local,
+                                                    new.mia = new.mia)))
     }
   }
   

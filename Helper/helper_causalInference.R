@@ -94,7 +94,13 @@ predict_gbm <- function(X, treat, seed){
 # Regression forest (of grf package) on complete X
 predict_grf <- function(X, treat, seed){
   set.seed(seed)
-  X.m = model.matrix(~. , data=X)
+  na.action <- options()$na.action
+  options(na.action='na.pass')
+  if (is.data.frame(X)){
+    X.m = model.matrix(~., data=X)
+  } else {
+    X.m = model.matrix(~., data=data.frame(X))
+  }
   if (max(as.integer(treat))==2){
     treat=as.integer(treat)-1
   } else {
@@ -105,6 +111,7 @@ predict_grf <- function(X, treat, seed){
   pred = predict(forest.W)$predictions
   fitted = as.data.frame(pred)
   colnames(fitted) <- c("pscore")
+  options(na.action=na.action)
   return(fitted)
 }
 
@@ -395,13 +402,15 @@ dr <- function(X,
 
   # Use grf regression forests to fit propensity and outcome models and then use AIPW formula for treatment effect estimation
   if (ps.method == "grf" & out.method == "grf"){
+    na.action <- options()$na.action
+    options(na.action='na.pass')
     var.factor <- colnames(X2)[sapply(X2, is.factor)]
-    X.1.m = model.matrix(~. -1, data=X2[which(treat==1),], 
+    X.1.m = model.matrix(~. -1, data=data.frame(X2[which(treat==1),]), 
                          contrasts = as.list(setNames(rep("contr.sum", length(var.factor)), var.factor)))
-    X.0.m = model.matrix(~. -1, data=X2[which(treat==0),],
+    X.0.m = model.matrix(~. -1, data=data.frame(X2[which(treat==0),]),
                          contrasts = as.list(setNames(rep("contr.sum", length(var.factor)), var.factor)))
     
-    X.m = model.matrix(~. -1, data=X2, 
+    X.m = model.matrix(~. -1, data=data.frame(X2), 
                        contrasts = as.list(setNames(rep("contr.sum", length(var.factor)), var.factor)))
     
     forest.1.Y = regression_forest(X.1.m, outcome[which(treat==1)], tune.parameters = "all")
@@ -422,23 +431,51 @@ dr <- function(X,
     delta_i <- y_1.hat -  y_0.hat + treat*(outcome-y_1.hat)*W.hat - (1-treat)*(outcome-y_0.hat)*W.hat
     treatment_effect_dr <- mean(delta_i)
     treatment_effect_dr <- c(treatment_effect_dr, sqrt(sum((delta_i-treatment_effect_dr)^2))/n.sample)
-
+    options(na.action=na.action)
   } 
 
   # Use grf's average_treatment_effect function
   if (ps.method == "grf.ate" & out.method == "grf.ate") {  
+    na.action <- options()$na.action
+    options(na.action='na.pass')
     y.hat <- NULL
     if (!is.null(X.for.outcome)) {
-      X.m = model.matrix(~. , data=X2)
+      X.m = model.matrix(~. , data=data.frame(X2))
       forest.Y = regression_forest(X.m, outcome, tune.parameters = "all")
       y.hat = predict(forest.Y, X.m)$predictions
     }
+    w.hat <- NULL
+    if (!is.null(X.for.ps)) {
+      X.m = model.matrix(~. , data=data.frame(X1))
+      forest.W = regression_forest(X.m, treat, tune.parameters = "all")
+      w.hat = predict(forest.W, X.m)$predictions
+    }
     
-    X.m <- model.matrix(~. , data=X1) # X1 corresponds to confounders
-    tau.forest = causal_forest(X.m, outcome, treat, Y.hat = y.hat)
+    X <- X.orig
+    mask <- mask.orig
+    
+    length.covariates <- dim(X)[2]
+    if (!is.null(mask)){
+      col.complete <- which(sapply(mask, FUN=function(x) length(unique(x))==1))
+    } else{
+      col.complete <- c()
+    }
+    length.mask <- 0
+    
+    colnames(X) <- paste("X", 1:dim(X)[2], sep="")
+    Xconf <- X
+    if (!is.null(mask)) {
+      Xconf <- cbind(X, mask)
+      length.mask <- dim(mask)[2]
+    }
+    if (length.mask>0){
+      colnames(Xconf) <- c(colnames(X), paste0("R",1:length.mask))
+    }
+    X.m <- model.matrix(~. , data=data.frame(Xconf)) # Xconf corresponds to confounders
+    tau.forest = causal_forest(X.m, outcome, treat, Y.hat = y.hat, W.hat =w.hat)
   
     treatment_effect_dr <- average_treatment_effect(tau.forest, target.sample = target, subset = subset)
-    
+    options(na.action=na.action)
   } 
 
   # Use EM for linear outcome model (either on complete(d) or incomplete X)
