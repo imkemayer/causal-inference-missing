@@ -342,9 +342,8 @@ dr <- function(X,
       fitted <- predict_grf(X1, as.factor(treat), seed)
     }
   }
-
   # Compute weights depending on the estimand
-  W <- as.integer(as.character(treat))
+  W <- as.logical(as.character(treat))
   if (!is.null(fitted)){
     if (target == "all"){
       fitted$weight <- (W)/fitted$pscore + (1 - W)/ (1 - fitted$pscore)
@@ -506,12 +505,15 @@ dr <- function(X,
       df.treated <- df.treated[,!one.level.treated]
       fmla <- as.formula(paste0("y ~ ", paste( colnames(df.treated[,2:ncol(df.treated)]), collapse= "+")))
       if (out.method == "glm"){
-        lm.treated <- lm(fmla, data = df.treated)
+        if (length(unique(df.treated[,1]))==2){ y = as.factor(df.treated[,1]) } else { y = df.treated[,1] }
+        lm.treated <- train(y=y,
+                            x=data.frame(df.treated[,-1]), method="glm",
+                            trControl = trainControl(method="cv",number=5))
       } else {
         if (length(unique(df.treated[,1]))==2){ y = as.factor(df.treated[,1]) } else { y = df.treated[,1] }
         lm.treated <- train(y= y,
                        x=data.frame(df.treated[,-1]), method="gbm",
-                       trControl = trainControl(method="cv",number=5), verbose = FALSE)
+                       trControl = trainControl(method="cv",number=5))
       }
 
       df.control <- df.control[!duplicated(df.control[,2:ncol(df.control)]),]
@@ -519,19 +521,21 @@ dr <- function(X,
       df.control <- df.control[,!one.level.control]
       fmla <- as.formula(paste0("y ~ ", paste( colnames(df.control[,2:ncol(df.control)]), collapse= "+")))
       if (out.method == "glm"){
-        lm.control <- lm(fmla, data = df.control)
+        if (length(unique(df.control[,1]))==2) { y = as.factor(df.control[,1]) } else { y = df.control[,1] }
+        lm.control <- train(y=y,
+                            x=data.frame(df.control[,-1]), method="glm",
+                            trControl = trainControl(method="cv",number=5))
       } else {
         if (length(unique(df.control[,1]))==2) { y = as.factor(df.control[,1]) } else { y = df.control[,1] }
         lm.control <- train(y= y,
                        x=data.frame(df.control[,-1]), method="gbm",
-                       trControl = trainControl(method="cv",number=5), verbose = FALSE)
+                       trControl = trainControl(method="cv",number=5))
       }
 
       colnames(X2) <- paste("X", 1:dim(X2)[2], sep="")
       y_1.hat <- as.numeric(predict(lm.treated, X2[,!one.level.treated[-1]]))
       y_0.hat <- as.numeric(predict(lm.control, X2[,!one.level.control[-1]]))
     }
-
     # EM for linear regression Y ~ X with missing values to predict potential outcomes 
     else {
       # Parameter estimation of potential outcome model under treatment
