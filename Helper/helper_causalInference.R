@@ -197,7 +197,11 @@ ipw <- function(X, outcome, treat,
   }
   
   # Compute weights depending on the estimand
-  W <- as.integer(as.character(treat))
+  if (is.numeric(treat)){
+    W <- as.logical(treat)
+  } else {
+    W <- as.logical(as.character(treat))
+  }
   if (target == "all"){
     fitted$weight <- (W)/fitted$pscore + (1 - W)/ (1 - fitted$pscore)
   } else if (target == "treated") {
@@ -214,7 +218,7 @@ ipw <- function(X, outcome, treat,
   
   
   # Trim the weights (default: no trimming)
-  if (any(is.nan(fitted$weight)) | any(is.infinite(fitted$weight))){
+  if (any(is.na(fitted$weight)) | any(is.infinite(fitted$weight))){
     weightMax <- quantile(fitted$weight, c(trimming_weight), na.rm=TRUE) 
     fitted[is.na(fitted$weight) ,"weight"] <- weightMax # If the weight is NA this means that pscore was 0
     fitted[fitted$weight > weightMax,"weight"] <- weightMax
@@ -224,19 +228,27 @@ ipw <- function(X, outcome, treat,
   
   
   # Compute HT verion of IPW
-  Y <- as.double(as.character(outcome))
+  if (!is.numeric(outcome)){
+    if (length(unique(outcome))==2){
+      Y <- as.logical(as.character(outcome))
+    } else
+      Y <- as.numeric(as.character(outcome))
+  } else{
+    Y <- outcome
+  }
   ipw1 <- 1/length(Y)*(sum(Y[which(W==1)]*fitted$weight[which(W==1)]) - sum(Y[which(!(W==1))]*fitted$weight[which(!(W==1))]))
   
   # Compute normalized version of IPW
   ipw2 <- 1/sum(fitted$weight[which(W==1)]) * sum(Y[which(W==1)] * fitted$weight[which(W==1)]) - 1/sum(fitted$weight[which(!(W==1))]) * sum(Y[which(!(W==1))] * fitted$weight[which(!(W==1))])
   
   #if (ps.method == "glm"){
-    mod <- lm(Y~treat, weights = fitted$weight)
-    se.ipw2 <- sqrt(diag(sandwich::vcovHC(mod, type = "HC")))[2]
+  #  mod <- lm(Y~treat, weights = fitted$weight)
+  #  se.ipw2 <- sqrt(diag(sandwich::vcovHC(mod, type = "HC")))[2]
   #} else {
-    #se.ipw2 <- mean((outcome[which(treat==1)] - 1/sum(fitted$weight[which(treat==1)]) * sum(outcome[which(treat==1)] * fitted$weight[which(treat==1)]))^2 * fitted$weight[which(treat==1)] 
-    #                  +(outcome[which(treat==0)] - 1/sum(fitted$weight[which(!(treat==1))]) * sum(outcome[which(!(treat==1))] * fitted$weight[which(!(treat==1))]))^2 * fitted$weight[which(treat==0)])
-    
+  #  se.ipw2 <- mean((Y[which(W==1)] - 1/sum(fitted$weight[which(W==1)]) * sum(Y[which(W==1)] * fitted$weight[which(W==1)]))^2 * fitted$weight[which(W==1)] 
+  #                   +(Y[which(W==0)] - 1/sum(fitted$weight[which(W==0)]) * sum(Y[which(W==0)] * fitted$weight[which(W==0)]))^2 * fitted$weight[which(W==0)])
+    delta_i <- 1/sum(fitted$weight[which(W==1)]) * W*(Y * fitted$weight) - 1/sum(fitted$weight[which(W==0)]) * (1-W)*(Y * fitted$weight)
+    se.ipw2 <- sqrt(var(length(Y)*delta_i) / (length(Y) - 1))
   #}
   return(cbind(ipw1 = ipw1,
                ipw2 = ipw2,
