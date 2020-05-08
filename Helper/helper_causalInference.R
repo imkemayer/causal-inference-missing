@@ -252,15 +252,9 @@ ipw <- function(X, outcome, treat,
   # Compute normalized version of IPW
   ipw2 <- 1/sum(fitted$weight[which(W==1)]) * sum(Y[which(W==1)] * fitted$weight[which(W==1)]) - 1/sum(fitted$weight[which(!(W==1))]) * sum(Y[which(!(W==1))] * fitted$weight[which(!(W==1))])
   
-  #if (ps.method == "glm"){
-  #  mod <- lm(Y~treat, weights = fitted$weight)
-  #  se.ipw2 <- sqrt(diag(sandwich::vcovHC(mod, type = "HC")))[2]
-  #} else {
-  #  se.ipw2 <- mean((Y[which(W==1)] - 1/sum(fitted$weight[which(W==1)]) * sum(Y[which(W==1)] * fitted$weight[which(W==1)]))^2 * fitted$weight[which(W==1)] 
-  #                   +(Y[which(W==0)] - 1/sum(fitted$weight[which(W==0)]) * sum(Y[which(W==0)] * fitted$weight[which(W==0)]))^2 * fitted$weight[which(W==0)])
-    delta_i <- 1/sum(fitted$weight[which(W==1)]) * W*(Y * fitted$weight) - 1/sum(fitted$weight[which(W==0)]) * (1-W)*(Y * fitted$weight)
-    se.ipw2 <- sqrt(var(length(Y)*delta_i) / (length(Y) - 1))
-  #}
+  delta_i <- 1/sum(fitted$weight[which(W==1)]) * W*(Y * fitted$weight) - 1/sum(fitted$weight[which(W==0)]) * (1-W)*(Y * fitted$weight)
+  se.ipw2 <- sqrt(var(length(Y)*delta_i) / (length(Y) - 1))
+  
   return(cbind(ipw1 = ipw1,
                ipw2 = ipw2,
                se.ipw2 = se.ipw2))
@@ -796,27 +790,6 @@ dr <- function(X,
           options(na.action = na.action.default)
         }
       }
-
-      # dim2.X <- dim(X)[2]
-      # X.imp.ml <- get_imputeEM(as.matrix(cbind(X[which(treat==max(as.numeric(treat))),])))$Ximp
-      # X.imp.ml <- X.imp.ml[,1:dim2.X]
-      #
-      # # X.imp.ml <- imputeEM(as.matrix(cbind(X)))$Ximp
-      # # X.imp.ml <- X.imp.ml[which(sample$treat==1),1:dim2.X]
-      #
-      # beta_treated <- lm(y[which(treat==max(as.numeric(treat)))] ~ as.matrix(X.imp.ml))$coefficient
-      #
-      # #X.imp.ml <- imputeEM(as.matrix(cbind(X[which(sample$treat==0),],y[which(sample$treat==0)])))$Ximp
-      # X.imp.ml <- get_imputeEM(as.matrix(cbind(X[which(treat==min(as.numeric(treat))),])))$Ximp
-      # X.imp.ml <- X.imp.ml[,1:dim2.X]
-      # 
-      # # X.imp.ml <- imputeEM(as.matrix(cbind(X)))$Ximp
-      # # X.imp.ml <- X.imp.ml[which(sample$treat==0),1:dim2.X]
-      # 
-      # beta_control <- lm(y[which(treat==min(as.numeric(treat)))] ~ as.matrix(X.imp.ml))$coefficient
-      #
-      # X2 <- get_imputeEM(as.matrix(cbind(X)))$Ximp
-      # X2 <- X2[ ,1:dim2.X]
       
       X2.treated <- X2
       X2.control <- X2
