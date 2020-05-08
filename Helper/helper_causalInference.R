@@ -53,15 +53,25 @@ predict_misaem <- function(X, treat, seed=0, pattern = NULL, use.interaction = F
 }
 
 # Standard logistic regression on complete X
-predict_glm <- function(X, treat, seed, family = binomial){
+predict_glm <- function(X, treat, seed, family = binomial, regularize=FALSE){
   set.seed(seed)
   
-  glm_mod <- train(y = treat,
-                   x = X,
-                   trControl = trainControl(method = "cv", number = 5),
-                   method = "glm", 
-                   family="binomial")
-  pred <- glm_mod$finalModel$fitted.values 
+  if (regularize){
+    x <- model.matrix(~., data = X)
+    cv.fit <- glmnet::cv.glmnet(x=x, 
+                                y=treat, alpha = 0,
+                                family = "binomial")
+    glm_mod <- glmnet::glmnet(x=x, y=treat, alpha = 0, family = "binomial",
+                              lambda = cv.fit$lambda.min)
+    pred <- predict(glm_mod, newx = x, type="response")
+  } else {
+    glm_mod <- train(y = treat,
+                     x = X,
+                     trControl = trainControl(method = "cv", number = 5),
+                     method = "glm", 
+                     family="binomial")
+    pred <- glm_mod$finalModel$fitted.values 
+  }
   fitted = as.data.frame(pred)
   colnames(fitted) <- c("pscore")
   return(fitted)
@@ -136,7 +146,8 @@ ipw <- function(X, outcome, treat,
                 trimming_weight = 1,
                 fitted=NULL,
                 mask= NULL,
-                use.interaction = FALSE){
+                use.interaction = FALSE,
+                regularize = FALSE){
   # @param X [data.frame] confounders \eqn{n \times p}{n * p}
   # @param outcome Response vector \eqn{n \times 1}{n * 1}
   # @param treat Binary treatment assignment vector \eqn{n \times 1}{n * 1}
@@ -184,7 +195,7 @@ ipw <- function(X, outcome, treat,
   # Estimate propensity scores
   if (is.null(fitted)){
     if (ps.method == "glm") {
-      fitted <- predict_glm(X, as.factor(treat), seed)
+      fitted <- predict_glm(X, as.factor(treat), seed, regularize=regularize)
     } else if (ps.method == "rf") {
       fitted <- predict_random_forests(X, as.factor(treat), seed)
     } else if (ps.method == "gbm") {
@@ -222,7 +233,7 @@ ipw <- function(X, outcome, treat,
     weightMax <- quantile(fitted$weight, c(trimming_weight), na.rm=TRUE) 
     fitted[is.na(fitted$weight) ,"weight"] <- weightMax # If the weight is NA this means that pscore was 0
     fitted[fitted$weight > weightMax,"weight"] <- weightMax
-    weightMin <- quantile(fitted$weight, c(1-trimming_weight)) 
+    weightMin <- quantile(fitted$weight, c(1-trimming_weight), na.rm=TRUE) 
     fitted[fitted$weight < weightMin,"weight"] <- weightMin
   }
   
@@ -277,7 +288,8 @@ dr <- function(X,
                mask.for.ps = NULL,
                mask.for.outcome = NULL,
                use.interaction = FALSE,
-               subset = NULL){
+               subset = NULL,
+               regularize = FALSE){
 
   #' @param X [data.frame] confounders \eqn{n \times p}{n * p}
   #' @param X.for.ps [data.frame] confounders and other predictors of treatment assignment \eqn{n \times (p + p_p)}{n * (p+pp)}
@@ -294,7 +306,8 @@ dr <- function(X,
   #' @param mask.for.prop [data.frame] response pattern if it is to be added to the propensity model (optional)
   #' @param mask.for.outcome [data.frame] response pattern if it is to be added to the outcome model (optional)
   #' @param use.interaction [boolean] whether to add interactions between fully observed confounders and the mask (optional)
-
+  #' @param regularize [boolean] whether to regularize logistic or linear regressions
+  #' 
   #' @return The average treatment effect estimate and an estimate of its standard deviation
   
   ##################
@@ -345,7 +358,7 @@ dr <- function(X,
   # Estimate propensity scores
   if (is.null(fitted)) {
     if (ps.method == "glm") {
-      fitted <- predict_glm(X1, as.factor(treat), seed)
+      fitted <- predict_glm(X1, as.factor(treat), seed, regularize=regularize)
     } else if (ps.method == "rf") {
       fitted <- predict_random_forests(X1, as.factor(treat), seed)
     } else if (ps.method == "gbm") {
@@ -375,7 +388,7 @@ dr <- function(X,
     weightMax <- quantile(fitted$weight, c(trimming_weight), na.rm=TRUE) 
     fitted[is.na(fitted$weight) ,"weight"] <- weightMax # If the weight is NA this means that pscore was 0
     fitted[fitted$weight > weightMax,"weight"] <- weightMax
-    weightMin <- quantile(fitted$weight, c(1-trimming_weight)) 
+    weightMin <- quantile(fitted$weight, c(1-trimming_weight), na.rm=TRUE) 
     fitted[fitted$weight < weightMin,"weight"] <- weightMin
   }
 
@@ -488,7 +501,77 @@ dr <- function(X,
     treatment_effect_dr <- average_treatment_effect(tau.forest, target.sample = target, subset = subset)
     options(na.action=na.action)
   } 
-
+  if (ps.method == "glm.grf" & out.method == "glm.grf") {  
+    if (length(unique(outcome))==2){ y = as.factor(outcome) } else { y = outcome }
+    if (regularize){
+      x <- model.matrix(~., data = data.frame(X2))
+      if (is.factor(y)){
+        cv.fit <- glmnet::cv.glmnet(x=x, 
+                                    y=y, alpha = 0,
+                                    family = "binomial")
+        lm.fit<- glmnet::glmnet(x=x, y=y, alpha = 0, family = "binomial",
+                                     lambda = cv.fit$lambda.min)
+      } else {
+        cv.fit <- glmnet::glmnet(x=x, 
+                                 y=y, alpha = 0, nlambda = 50)
+        lm.fit <- glmnet::glmnet(x=x, y=y, alpha = 0,
+                                     lambda = cv.fit$lambda.min)
+      }
+      y.hat <- as.numeric(predict(lm.fit, newx=x, type="response"))
+    } else { 
+      if (is.factor(y)){
+        lm.fit <- train(y=y,
+                            x=X2, method="glm",
+                            trControl = trainControl(method="cv",number=5),
+                            family="binomial")
+      } else {
+        lm.fit <- train(y=y,
+                        x=X2, method="glm",
+                        trControl = trainControl(method="cv",number=5))
+      }
+      y.hat <- as.numeric(predict(lm.fit, X2))
+    }
+    
+    if (regularize){
+      x <- model.matrix(~., data = data.frame(X1))
+      cv.fit <- glmnet::cv.glmnet(x=x, 
+                                  y=as.factor(treat), alpha = 0,
+                                  family = "binomial")
+      lm.fit<- glmnet::glmnet(x=x, y=as.factor(treat), alpha = 0, family = "binomial",
+                                lambda = cv.fit$lambda.min)
+      w.hat <- as.numeric(predict(lm.fit, newx=x, type="response"))
+    } else { 
+      lm.fit <- train(y=as.factor(treat),
+                      x=X1, method="glm",
+                      trControl = trainControl(method="cv",number=5),
+                      family="binomial")
+      w.hat <- as.numeric(predict(lm.fit, X1))
+    }
+    
+    X <- X.orig
+    mask <- mask.orig
+    length.covariates <- dim(X)[2]
+    if (!is.null(mask)){
+      col.complete <- which(sapply(mask, FUN=function(x) length(unique(x))==1))
+    } else{
+      col.complete <- c()
+    }
+    length.mask <- 0
+    colnames(X) <- paste("X", 1:dim(X)[2], sep="")
+    Xconf <- X
+    if (!is.null(mask)) {
+      Xconf <- cbind(X, mask)
+      length.mask <- dim(mask)[2]
+    }
+    if (length.mask>0){
+      colnames(Xconf) <- c(colnames(X), paste0("R",1:length.mask))
+    }
+    X.m <- model.matrix(~. , data=data.frame(Xconf)) # Xconf corresponds to confounders
+    tau.forest = causal_forest(X.m, outcome, treat, Y.hat = y.hat, W.hat =w.hat)
+    
+    treatment_effect_dr <- average_treatment_effect(tau.forest, target.sample = target, subset = subset)
+  }
+  
   # Use EM for linear outcome model (either on complete(d) or incomplete X)
   if (out.method %in% c("glm", "gbm")){ # "gbm" is only available for complete data
 
@@ -518,9 +601,25 @@ dr <- function(X,
       fmla <- as.formula(paste0("y ~ ", paste( colnames(df.treated[,2:ncol(df.treated)]), collapse= "+")))
       if (out.method == "glm"){
         if (length(unique(df.treated[,1]))==2){ y = as.factor(df.treated[,1]) } else { y = df.treated[,1] }
-        lm.treated <- train(y=y,
-                            x=data.frame(df.treated[,-1]), method="glm",
-                            trControl = trainControl(method="cv",number=5))
+        if (regularize){
+          x <- model.matrix(~., data = data.frame(df.treated[,-1]))
+          if (is.factor(y)){
+            cv.fit <- glmnet::cv.glmnet(x=x, 
+                                        y=y, alpha = 0,
+                                        family = "binomial")
+            lm.treated <- glmnet::glmnet(x=x, y=y, alpha = 0, family = "binomial",
+                                         lambda = cv.fit$lambda.min)
+          } else {
+            cv.fit <- glmnet::glmnet(x=x, 
+                                  y=y, alpha = 0, nlambda = 50)
+            lm.treated <- glmnet::glmnet(x=x, y=y, alpha = 0,
+                                         lambda = cv.fit$lambda.min)
+          }
+        } else {
+          lm.treated <- train(y=y,
+                              x=data.frame(df.treated[,-1]), method="glm",
+                              trControl = trainControl(method="cv",number=5))
+        }
       } else {
         if (length(unique(df.treated[,1]))==2){ y = as.factor(df.treated[,1]) } else { y = df.treated[,1] }
         lm.treated <- train(y= y,
@@ -534,9 +633,25 @@ dr <- function(X,
       fmla <- as.formula(paste0("y ~ ", paste( colnames(df.control[,2:ncol(df.control)]), collapse= "+")))
       if (out.method == "glm"){
         if (length(unique(df.control[,1]))==2) { y = as.factor(df.control[,1]) } else { y = df.control[,1] }
-        lm.control <- train(y=y,
+        if (regularize){
+          x <- model.matrix(~., data = data.frame(df.control[,-1]))
+          if (is.factor(y)){
+            cv.fit <- glmnet::cv.glmnet(x=x, 
+                                        y=y, alpha = 0,
+                                        family = "binomial")
+            lm.control <- glmnet::glmnet(x=x, y=y, alpha = 0, family = "binomial",
+                                         lambda = cv.fit$lambda.min)
+          } else {
+            cv.fit <- glmnet::glmnet(x=x, 
+                                     y=y, alpha = 0, nlambda = 50)
+            lm.control <- glmnet::glmnet(x=x, y=y, alpha = 0,
+                                         lambda = cv.fit$lambda.min)
+          }
+        } else {
+          lm.control <- train(y=y,
                             x=data.frame(df.control[,-1]), method="glm",
                             trControl = trainControl(method="cv",number=5))
+        }
       } else {
         if (length(unique(df.control[,1]))==2) { y = as.factor(df.control[,1]) } else { y = df.control[,1] }
         lm.control <- train(y= y,
@@ -545,8 +660,15 @@ dr <- function(X,
       }
 
       colnames(X2) <- paste("X", 1:dim(X2)[2], sep="")
-      y_1.hat <- as.numeric(predict(lm.treated, X2[,!one.level.treated[-1]]))
-      y_0.hat <- as.numeric(predict(lm.control, X2[,!one.level.control[-1]]))
+      if (regularize){
+        x <- model.matrix(~., data = X2[,!one.level.treated[-1]])
+        y_1.hat <- as.numeric(predict(lm.treated, newx=x, type="response"))
+        x <- model.matrix(~., data = X2[,!one.level.control[-1]])
+        y_0.hat <- as.numeric(predict(lm.control, newx=x, type="response"))
+      } else {
+        y_1.hat <- as.numeric(predict(lm.treated, X2[,!one.level.treated[-1]]))
+        y_0.hat <- as.numeric(predict(lm.control, X2[,!one.level.control[-1]]))
+      }
     }
     # EM for linear regression Y ~ X with missing values to predict potential outcomes 
     else {
