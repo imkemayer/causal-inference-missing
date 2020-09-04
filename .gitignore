@@ -7,6 +7,7 @@
 *.csv
 *.html
 *.pdf
+*.pptx
 *job*
 2019*.R
 Figures/
@@ -15,4 +16,6 @@ Figures/
 Scripts/
 MissDeepCausal/
 *_TranexamicAcid.Rmd
+*_TranexamicAcid_TBI.Rmd
+*-copy.*
 .DS_Store
