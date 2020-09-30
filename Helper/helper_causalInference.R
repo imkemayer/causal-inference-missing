@@ -363,7 +363,11 @@ dr <- function(X,
     }
   }
   # Compute weights depending on the estimand
-  W <- as.logical(as.character(treat))
+  if (is.numeric(treat)){
+    W <- as.logical(treat)
+  } else {
+    W <- as.logical(as.character(treat))
+  }
   if (!is.null(fitted)){
     if (target == "all"){
       fitted$weight <- (W)/fitted$pscore + (1 - W)/ (1 - fitted$pscore)
