@@ -173,7 +173,7 @@ ipw <- function(X, outcome, treat,
     colname <- colnames(X)
     X <- cbind(X, mask)
     length.mask <- dim(mask)[2]
-    if (length.mask>0){
+  } if (length.mask>0){
       colnames(X) <- c(colname, paste0("R",1:length.mask))
     }
   }
