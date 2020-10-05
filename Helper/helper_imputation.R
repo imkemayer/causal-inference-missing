@@ -125,7 +125,6 @@ get_imputePC <- function(df, seed,
   }
   imputedData <- data.frame(imputed$completeObs)
   
-  
   data.num <- colnames(imputedData)[which(sapply(df, FUN=function(x) (is.numeric(x) & !(is.integer(x)))))]
   
   for (j in colnames(imputedData)){

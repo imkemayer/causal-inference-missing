@@ -175,7 +175,7 @@ ipw <- function(X, outcome, treat,
     length.mask <- dim(mask)[2]
   } 
   if (length.mask>0){
-      colnames(X) <- c(colname, paste0("R",1:length.mask))
+    colnames(X) <- c(colname, paste0("R",1:length.mask))
   }
   
   # Add interaction terms between fully observed X and mask

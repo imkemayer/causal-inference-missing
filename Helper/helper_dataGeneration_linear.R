@@ -24,7 +24,7 @@ expit <- function(x){
 }
 
 make_V <- function(r, p){
-  matrix(rnorm(r*p), nrow = p, ncol = r)
+  matrix(rnorm(r*p), nrow=p, ncol=r)
 }
 
 design_matrix <- function(V, n, r, p){
@@ -34,7 +34,7 @@ design_matrix <- function(V, n, r, p){
   #   X: X = UV^T
   
   design = vector("list")
-  design$U = matrix(rnorm(n*r), nrow = n, ncol = r)
+  design$U = matrix(rnorm(n*r), nrow=n, ncol=r)
   design$V = V
   design$X = design$U %*% t(design$V)
   
@@ -45,11 +45,11 @@ design_matrix <- function(V, n, r, p){
   design
 }
 
-perturbation_gaussian <- function(design, noise_sd = 5){
+perturbation_gaussian <- function(design, noise_sd=5){
   # add Gaussian noise to the UV^T matrix, which creates Gaussian noisy proxies 
   n = nrow(design$X)
   p = ncol(design$X)
-  design$X + matrix(rnorm(n*p, 0, noise_sd), nrow = n, ncol = p)
+  design$X + matrix(rnorm(n*p, 0, noise_sd), nrow=n, ncol=p)
 }
 
 #Data matrix and parameter matrix simulations 
@@ -58,20 +58,20 @@ latent_confounders <- function(V, n=100, p=10,r=3,sig=0.1){ # sig=0.25
   design <- design_matrix(V, n, r, p)
   X.noisy <- design$X
   if (sig>0){
-    X.noisy <- perturbation_gaussian(design, noise_sd = sig)
+    X.noisy <- perturbation_gaussian(design, noise_sd=sig)
   }
   return(list(Z = design$U, X = design$X, Xnoisy = X.noisy))
 }
 
 
-gen_linear <- function(n, p=10, r = 3, setting = "linear1",
-                       seed = 0, ps.dependence = "strong", sd = 1, 
-                       mechanism=FALSE, prop.missing = 0,
-                       cit = FALSE, cio = FALSE, 
-                       cit2 = FALSE, cio2 = FALSE,
-                       ci2_imp = "mice",
-                       link = "log-lin",
-                       V = NULL){
+gen_linear <- function(n, p=10, r=3, setting="linear1", tau=1,
+                       seed=0, ps.dependence="strong", sd=1, 
+                       mechanism=FALSE, prop.missing=0,
+                       cit=FALSE, cio=FALSE, 
+                       cit2=FALSE, cio2=FALSE,
+                       ci2_imp="mice",
+                       link="log-lin",
+                       V=NULL){
   # setting="linear1" 
   #   - case 1: mechanism="MCAR": p orthogonal covariates with NA in all covariates
   #   - case 2: mechanism="MAR": p covariates with small correlation, NA in half of the covariates (with same Pr of missing in both)
@@ -160,12 +160,12 @@ gen_linear <- function(n, p=10, r = 3, setting = "linear1",
       } else if (mechanism == "MAR"){
         idx_NA <- c()
         for (j in 1:ceiling(p/2)) {
-          m <- sapply(expit(1*(setting==1) + 0.09*(setting==2) + X[,(ceiling(p/2)+1):p]%*%gamma.mar.x[,setting]), FUN= function(pr) rbinom(n=1, size=1, prob = pr))
+          m <- sapply(expit(1*(setting==1) + 0.09*(setting==2) + X[,(ceiling(p/2)+1):p]%*%gamma.mar.x[,setting]), FUN= function(pr) rbinom(n=1, size=1, prob=pr))
           X.incomp[which(m==1), j] <- NA
           idx_NA <- cbind(idx_NA, m==1)
         }
-        idx_NA <- cbind(idx_NA, matrix(FALSE, nrow = n, ncol = floor(p/2)))
-        idx_NA <- matrix(idx_NA, nrow=n, ncol = p)
+        idx_NA <- cbind(idx_NA, matrix(FALSE, nrow=n, ncol=floor(p/2)))
+        idx_NA <- matrix(idx_NA, nrow=n, ncol=p)
         
       } else if (mechanism == "MNAR"){
         idx_NA <- c()
@@ -178,8 +178,8 @@ gen_linear <- function(n, p=10, r = 3, setting = "linear1",
           X.incomp[which(m==1), j] <- NA
           idx_NA <- cbind(idx_NA, m==1)
         }
-        idx_NA <- cbind(idx_NA, matrix(FALSE, nrow = n, ncol = floor(p/2)))
-        idx_NA <- matrix(idx_NA, nrow=n, ncol = p)
+        idx_NA <- cbind(idx_NA, matrix(FALSE, nrow=n, ncol=floor(p/2)))
+        idx_NA <- matrix(idx_NA, nrow=n, ncol=p)
       }
     } else if (setting == 3) {
       if (mechanism == "MCAR"){
@@ -191,12 +191,12 @@ gen_linear <- function(n, p=10, r = 3, setting = "linear1",
       if (mechanism == "MAR"){
         idx_NA <- c()
         for (j in 1:ceiling(p/2)) {
-          m <- sapply(expit(X[,(ceiling(p/2)+1):p]%*%gamma.mar.x[,1]), FUN= function(p) rbinom(n=1, size=1, prob = p))
+          m <- sapply(expit(X[,(ceiling(p/2)+1):p]%*%gamma.mar.x[,1]), FUN= function(p) rbinom(n=1, size=1, prob=p))
           X.incomp[which(m==1), j] <- NA
           idx_NA <- cbind(idx_NA, m==1)
         }
-        idx_NA <- cbind(idx_NA, matrix(FALSE, nrow = n, ncol = floor(p/2)))
-        idx_NA <- matrix(idx_NA, nrow=n, ncol = p)
+        idx_NA <- cbind(idx_NA, matrix(FALSE, nrow=n, ncol=floor(p/2)))
+        idx_NA <- matrix(idx_NA, nrow=n, ncol=p)
 
       } 
       if (mechanism == "MNAR"){
@@ -210,8 +210,8 @@ gen_linear <- function(n, p=10, r = 3, setting = "linear1",
           X.incomp[which(m==1), j] <- NA
           idx_NA <- cbind(idx_NA, m==1)
         }
-        idx_NA <- cbind(idx_NA, matrix(FALSE, nrow = n, ncol = floor(p/2)))
-        idx_NA <- matrix(idx_NA, nrow=n, ncol = p)
+        idx_NA <- cbind(idx_NA, matrix(FALSE, nrow=n, ncol=floor(p/2)))
+        idx_NA <- matrix(idx_NA, nrow=n, ncol=p)
       }
     }
   }
@@ -228,22 +228,22 @@ gen_linear <- function(n, p=10, r = 3, setting = "linear1",
     if (ci2_imp == "mice"){
       X.imp <- get_MICE(X.incomp, seed=0, m=5, maxit=5)
     } else {
-      X.imp <- missMDA::MIPCA(X.incomp, ncp = d, nboot = 5)$res.MI
+      X.imp <- missMDA::MIPCA(X.incomp, ncp=d, nboot=5)$res.MI
     }
     tmp <-Reduce("+", X.imp) / length(X.imp) # take elementwise average over imputations
     X.tmp[idx_NA] <- tmp[idx_NA]
   } 
 
   if (ps.dependence=="strong"){
-      alpha <- array(alpha.star.strong, dim = dim(X.tmp)[2])
+      alpha <- array(alpha.star.strong, dim=dim(X.tmp)[2])
     } else if (ps.dependence == "moderate") {
-      alpha <- array(alpha.star.moderate, dim = dim(X.tmp)[2])
+      alpha <- array(alpha.star.moderate, dim=dim(X.tmp)[2])
     } else {
-      alpha <- array(alpha.star.low, dim = dim(X.tmp)[2])
+      alpha <- array(alpha.star.low, dim=dim(X.tmp)[2])
     }
   
   
-  offsets <- seq(-100, 100, length.out = 50)
+  offsets <- seq(-100, 100, length.out=50)
   balanced <- FALSE
   i <- 1
   best_idx <- 1
@@ -260,10 +260,10 @@ gen_linear <- function(n, p=10, r = 3, setting = "linear1",
   while ((i <= length(offsets)) & !(balanced) ){
     if (link == "log-lin"){
       prop_scores <- apply(data.frame(X.tmp), MARGIN=1, 
-                          FUN = function(z) expit(offsets[i]+2*(setting==3)+ z%*%alpha))
+                          FUN=function(z) expit(offsets[i]+2*(setting==3)+ z%*%alpha))
     } else if (link == "nonlinear3"){
       prop_scores <- apply(data.frame(X.tmp), MARGIN=1, 
-                          FUN = function(z) expit(offsets[i]+2*(setting==3)+ z%*%alpha))
+                          FUN=function(z) expit(offsets[i]+2*(setting==3)+ z%*%alpha))
     }
     else {
       prop_scores <- rep(0, dim(X.tmp)[1])
@@ -278,7 +278,7 @@ gen_linear <- function(n, p=10, r = 3, setting = "linear1",
     }
       
     # Treatment assignment
-    treat <- sapply(prop_scores, FUN= function(p) rbinom(n=1, size=1, prob = p)) # ifelse(runif(n, 0, 1) <= c(prob_scores), 1, 0)
+    treat <- sapply(prop_scores, FUN= function(p) rbinom(n=1, size=1, prob=p)) # ifelse(runif(n, 0, 1) <= c(prob_scores), 1, 0)
     
     # test whether there are at least 30% of the observations in each group
     balanced <- (sum(treat==1)/length(treat) > 0.3 & sum(treat==1)/length(treat)<0.7)
@@ -293,14 +293,14 @@ gen_linear <- function(n, p=10, r = 3, setting = "linear1",
   
   if (i > length(offsets)){
     prop_scores <- apply(data.frame(X.tmp), MARGIN=1, 
-                         FUN = function(z) expit(offsets[best_idx]+2*(setting==3)+ z%*%alpha))
+                         FUN=function(z) expit(offsets[best_idx]+2*(setting==3)+ z%*%alpha))
     # Treatment assignment
-    treat <- sapply(prop_scores, FUN= function(p) rbinom(n=1, size=1, prob = p))
+    treat <- sapply(prop_scores, FUN= function(p) rbinom(n=1, size=1, prob=p))
   }
   
   
   # Outcome
-  epsilons <- rnorm(n, sd = sd)
+  epsilons <- rnorm(n, sd=sd)
   y <- rep(0,n)
   
   X.tmp <- X
@@ -312,7 +312,7 @@ gen_linear <- function(n, p=10, r = 3, setting = "linear1",
     if (ci2_imp == "mice"){
       X.imp <- get_MICE(X.incomp, seed=0, m=5, maxit=5)
     } else {
-      X.imp <- missMDA::MIPCA(X.incomp, ncp = d, nboot = 5)$res.MI
+      X.imp <- missMDA::MIPCA(X.incomp, ncp=d, nboot=5)$res.MI
     }
     tmp <-Reduce("+", X.imp) / length(X.imp) # take elementwise average over imputations
     X.tmp[idx_NA] <- tmp[idx_NA]
@@ -330,7 +330,7 @@ gen_linear <- function(n, p=10, r = 3, setting = "linear1",
 
 
   
-  beta <- array(beta.star[2:length(beta.star)], dim = dim(X.tmp)[2])
+  beta <- array(beta.star[2:length(beta.star)], dim=dim(X.tmp)[2])
 
   
   if (link %in% c("log-lin", "nonlinear3")){
