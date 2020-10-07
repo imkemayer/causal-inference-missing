@@ -248,6 +248,8 @@ ipw <- function(X, outcome, treat,
     Y <- outcome
   }
   ipw1 <- 1/length(Y)*(sum(Y[which(W==1)]*fitted$weight[which(W==1)]) - sum(Y[which(!(W==1))]*fitted$weight[which(!(W==1))]))
+  delta_i <- 1/length(Y)* (W*(Y * fitted$weight) -  (1-W)*(Y * fitted$weight))
+  se.ipw1 <- sqrt(var(length(Y)*delta_i) / (length(Y) - 1))
   
   # Compute normalized version of IPW
   ipw2 <- 1/sum(fitted$weight[which(W==1)]) * sum(Y[which(W==1)] * fitted$weight[which(W==1)]) - 1/sum(fitted$weight[which(!(W==1))]) * sum(Y[which(!(W==1))] * fitted$weight[which(!(W==1))])
@@ -257,6 +259,7 @@ ipw <- function(X, outcome, treat,
   
   return(cbind(ipw1 = ipw1,
                ipw2 = ipw2,
+               se.ipw1 = se.ipw1,
                se.ipw2 = se.ipw2))
 }
 
