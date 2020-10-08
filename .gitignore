@@ -6,6 +6,7 @@
 *.RData
 *.csv
 *.html
+!ate_small_analysis_example.html
 *.pdf
 *.pptx
 *job*
