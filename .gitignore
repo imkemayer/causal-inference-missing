@@ -7,6 +7,9 @@
 *.csv
 *.html
 !pipeline_causal_inference_with_missing_attributes.html
+!preprocess_ate_analysis_traumabase_example.html
+!ate_analysis_traumabase_stratified_example.html
+!ate_analysis_traumabase_example.html
 *.pdf
 *.pptx
 *job*
