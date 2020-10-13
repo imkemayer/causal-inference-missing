@@ -6,7 +6,7 @@
 *.RData
 *.csv
 *.html
-!pipeline_causal_inferencE_with_missing_aatributes.html
+!pipeline_causal_inference_with_missing_attributes.html
 *.pdf
 *.pptx
 *job*
