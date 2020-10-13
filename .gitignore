@@ -6,7 +6,7 @@
 *.RData
 *.csv
 *.html
-!ate_small_analysis_example.html
+!pipeline_causal_inferencE_with_missing_aatributes.html
 *.pdf
 *.pptx
 *job*
