@@ -1,0 +1,1603 @@
+---
+title: "Treatment Effect of Tranexamic Acid on stratified TBI patients"
+author: "Imke Mayer"
+date: ""
+output: 
+  html_document:
+    fig_caption: yes
+    number_sections: yes
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache= TRUE)
+```
+
+
+In this R markdown we analyze the Traumabase Registry to estimate the treatment
+effect of the drug Tranexamic Acid (TXA) on mortality among patients with
+traumatic brain injury (TBI), stratified along 2 different criteria of severity.
+
+For this analysis, an expert committee has identified 17 confounders available
+in the Traumabase: `Trauma.center`, `Cardiac.arrest.ph`, 
+`SBP.ph.min, DBP.ph.min, HR.ph.max`, `SBP.ph, DBP.ph, HR.ph`, 
+`Shock.index.ph` (`HR.ph`/`SBP.ph`), `Cristalloid.volume`, `Colloid.volume`, 
+`SpO2.ph.min`, `Vasopressor.therapy`, `HemoCue.init`, `Delta.hemoCue`, 
+`AIS.external`, `Activation.HS.procedure`.
+
+
+# Preliminaries
+
+## Load libraries
+
+```{r load_libraries, results='hide'}
+library(cobalt)
+library(ggplot2)
+library(dplyr)
+library(reshape2)
+library(tableone)
+library(MASS)
+library(pracma)
+library(assertthat)
+
+library(caret) # 
+library(ranger)# Random Forests prediction
+library(FactoMineR) # Factorial data analysis
+library(grf) # Doubly robust treatment effect estimation
+
+library(norm)
+library(missMDA) # PCA/MCA with missing values + iterative PC imputation
+library(mice) # Multiple imputation
+library(VIM) # Missing values exploration and visualization
+
+# Define data directory
+data.dir <- "~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/Data/"
+rdata.dir <- "~/Documents/TraumaMatrix/CausalInference/Simulations/causal-inference-missing/TranexamicAcid/LargeTraumabase/RData/"
+fig.dir <- "~/Documents/TraumaMatrix/CausalInference/Simulations/causal-inference-missing/TranexamicAcid/LargeTraumabase/Figures/"
+
+library(devtools)
+# Load the ATE estimation functions `ipw` and `dr` from the GitHub repository
+source_url("https://raw.githubusercontent.com/imkemayer/causal-inference-missing/master/Helper/helper_causalInference.R")
+source_url("https://raw.githubusercontent.com/imkemayer/causal-inference-missing/master/Helper/helper_imputation.R")
+
+save_results <- FALSE
+tau <- NULL
+# Set random generator seed for reproducible results
+set.seed(0)
+```
+
+```{r ggplot_details, echo=F, warning=F, message=F}
+library(RColorBrewer) # Color scale
+myColors <- brewer.pal(6,"Set1")
+names(myColors) <- c("-", "pc.imp", "mf", "mia", "mice", "mean")
+myColorsATE <- c("black", "cyan")
+names(myColorsATE) <- c("ATE true", "ATE naive")
+colScale <- scale_colour_manual(name = c("", ""), values = c(myColors, myColorsATE))
+```
+
+## Load data
+Run R markdown `preprocess_ate_analysis_traumabase_example.Rmd` prior to this to pre-process 
+and save the data for the following analyses.
+```{r load_data_for_ate}
+data_indTBI <- read.csv(paste0(data.dir, 
+                               "ate_analysis_traumabase_large_data_preprocessed_tbi_individuals.csv"), 
+                        row.names = 1)
+seed <- 1234
+```
+
+```{r rename_data}
+synthetic <- FALSE
+
+X.na <- data_indTBI[,setdiff(colnames(data_indTBI), 
+                          c("TBI", "Tranexamic.acid", "Death"))]
+
+W <- data_indTBI$Tranexamic.acid
+Y <- data_indTBI$Death
+
+covariate_names <- colnames(X.na)
+n <- dim(X.na)[1]
+p <- dim(X.na)[2]
+
+df.na <- data.frame(cbind(X.na, W=W, Y=Y))
+colnames(df.na) <- c(covariate_names, "W", "Y")
+```
+
+This pipeline requires `W` to be binary and coded either with `{0,1}` or with 
+`{FALSE,TRUE}`, representing `{control,treatment}`.
+```{r check_types}
+assert_that(length(unique(W))==2)
+assert_that(unique(W) %in% c(0,1) || unique(W) %in% c(FALSE,TRUE))
+```
+
+In certain cases, not all covariates are necessarily confounders. Therefore we 
+specify the set of confounders in `confounder_names`. 
+Additionally, in some cases there are also variables that are only predictive of 
+the treatment assignment. Their names can be specified in `only_treatment_pred_names`.
+```{r, confounders}
+confounder_names <- c("Trauma.center", 
+                      "SBP.ph", "DBP.ph", "HR.ph", 
+                      "SBP.ph.min", "DBP.ph.min", "HR.ph.max",  
+                      "Cardiac.arrest.ph", "Vasopressor.therapy", "SpO2.ph.min",
+                      "AIS.external", "HemoCue.init", "Delta.hemoCue", 
+                      "Shock.index.ph", "Cristalloid.volume", "Colloid.volume", 
+                      "Activation.HS.procedure")
+only_treatment_pred_names <- c()
+only_outcome_pred_names <- setdiff(covariate_names, 
+                                   c(confounder_names, only_treatment_pred_names))
+```
+
+For the DR estimation, we can specify clusters, here we will use the Trauma centers
+as clusters.
+```{r clusters}
+cluster_names <- c("Trauma.center")
+```
+
+We list binary and other categorical variables to ensure correct type casts.
+```{r specify_types}
+binary_names <- intersect(covariate_names,
+                          c("Cardiac.arrest.ph", "Anticoagulant.therapy", 
+                            "Antiplatelet.therapy", "EVD", "Activation.HS.procedure",
+                            "Neurosurgery.day0", "Fi02", "Vasopressor.therapy"))
+
+categorical_names <- intersect(covariate_names,
+                               c("Trauma.center", "Pupil.anomaly", 
+                                 "Osmotherapy", "Osmotherapy.ph",
+                                 "Pupil.anomaly.ph",
+                                 "Improv.anomaly.osmo"))
+```
+
+It is possible that during the loading of the data set, certain 
+variables are not cast correctly. We check that the variable types are all correct
+according to the specified types in `binary_names` and `categorical_names`.
+```{r check_types_raw, echo=F}
+for (variable in binary_names) {
+  if (!is.factor(X.na[, variable])) {
+    X.na[, variable] <- as.factor(X.na[, variable])
+    levels(X.na[, variable]) <- c(FALSE, TRUE)
+  }
+}
+for (variable in categorical_names) {
+  if (!is.factor(X.na[, variable])) {
+    X.na[, variable] <- as.factor(X.na[, variable])
+  }
+}
+
+df.na <- data.frame(cbind(X.na, W=W, Y=Y))
+colnames(df.na) <- c(covariate_names, "W", "Y")
+```
+
+
+Look at the `Activation.HS.procedure` variable. The treatment TXA is generally 
+given to prevent the occurrence of hemorrhagic shock, a condition which is often 
+fatal. Let us see how is the treatment distributed w.r.t. this variable.
+
+```{r hs_procedure}
+res.table <- table(df.na$W==1, df.na$Activation.HS.procedure, 
+                   dnn = c("Treated","Activation.HS.procedure"),
+                   useNA = "ifany")
+print(res.table)
+```
+
+
+
+## List of strata to consider
+
+```{r strata}
+strata <- list(list("mild_moderate", "df.na[,'GCS.init'] >=9"),
+               list("severe", "df.na[,'GCS.init'] <9"),
+               list("both_react", "!(df.na[,'Pupil.anomaly.ph'] %in% c('Anisocorie (unilatérale)','Mydriase Bilatérale'))"),
+               list("any_non_react", "df.na[,'Pupil.anomaly.ph'] %in% c('Anisocorie (unilatérale)','Mydriase Bilatérale')"))
+```
+
+
+First we compute the unadjusted ATE, ignoring the confounders.
+
+```{r unadjusted_ate}
+ate_raw <- c()
+for (stratum in strata){
+  df_stratum <- df.na[which(eval(parse(text=stratum[[2]]))),]
+  ate_raw <- rbind(ate_raw,
+                   cbind(stratum[[1]], mean(df_stratum$Y[which(as.logical(df_stratum$W))]) - mean(df_stratum$Y[which(!as.logical(df_stratum$W))])))
+}
+colnames(ate_raw) <- c("Stratum", "ate_raw")
+ate_raw <- data.frame(ate_raw)
+ate_raw$ate_raw <- as.numeric(ate_raw$ate_raw)
+ate_raw
+```
+
+Let us also assess how the outcome is distributed with respect to the treatment group.
+
+```{r} 
+for (stratum in strata) { 
+  df_stratum <- df.na[which(eval(parse(text=stratum[[2]]))),]
+  if (length(unique(Y))==2){
+    print(stratum[[1]])
+    res.table <- table(as.factor(df_stratum$W), as.factor(df_stratum$Y), 
+                       dnn = c("W","Y"))
+    print(prop.table(res.table))
+  } else {
+    ggplot(data.frame(W=as.factor(df_stratum$W), Y=df_stratum$Y)) + 
+      geom_histogram(aes(Y, color=W), fill = "white") +
+      ggtitle(stratum[[1]])
+  }
+}
+```
+
+
+
+# Imputation
+
+We impute the data with two different methods (iterative FAMD, mice).
+
+## FAMD
+
+*Note that for this approach, an alternative would be to go back to the original 
+dataset, instead of focusing just on the patients with TBI and/or `AIS.head >= 2` 
+to impute the missing data. Even though we will only keep the patients with TBI 
+and/or `AIS.head>=2` while running the causal analysis, including the other 
+patients at this stage can allow the imputation of missing data to be more 
+informed by adding additional observations for comparison purposes.*
+
+Let's look at the matrix plot to identify if there are any variables that tend 
+to be missing together or if we can detect any clear violation of the missing 
+completely at random hypothesis:
+
+```{r matrixplot}
+matrixplot(df.na, sortby = 1, las=2, cex.axis = 0.3)
+```
+
+
+We can also run MCA on the missing and non missing entries to double check our 
+conclusion and to check if other groups of variables tend to be missing together:
+```{r }
+data_miss <- data.frame(is.na(df.na))
+data_miss <- apply(X=data_miss, FUN=function(x) if(x) "m" else "o", MARGIN=c(1,2))
+res.mca <- MCA(data_miss, graph = FALSE)
+plot(res.mca, invis = "ind", title = "MCA graph of the categories", cex =0.5)
+```
+
+
+
+We now perform a single imputation with a (regularized) iterative Factorial 
+Analysis for Mixed Data model, which will allow imputation to take into account 
+similarities between both individuals and relationships between variables. See: 
+https://arxiv.org/pdf/1301.4797.pdf
+
+First we find the optimal number of dimensions for the FAMD by cross-validation
+
+**Attention: this computation might take a long time. Set `eval=F` in the chunk
+header if you want to skip this part.** 
+```{r ncomp_all}
+if (file.exists(paste0(rdata.dir, "traumabase_tbi_ncomp_famd.RData"))) {
+  load(paste0(rdata.dir, "traumabase_tbi_ncomp_famd.RData"))
+  plot(1:length(ncomp_famd$criterion), ncomp_famd$criterion, xlab = "nb dim", ylab = "MSEP")
+} else {
+  ncomp_famd <- estim_ncpFAMD(df.na,
+  ncp.min = 1,
+  ncp.max=15,
+  method= "Regularized",
+  method.cv = "Kfold",
+  nbsim=10,
+  verbose = TRUE)
+
+  save(ncomp_famd,
+       file = paste0(rdata.dir, "traumabase_tbi_ncomp_famd.RData"))
+}
+```
+
+
+By cross-validation we find `ncp=6` to be the optimal number of components.
+
+```{r famd_impute}
+if (file.exists(paste0(rdata.dir, "traumabase_tbi_", length(confounder_names), 
+                       "confounders_", length(covariate_names), 
+                       "variables_imputed_famd.RData"))){
+  load(file=paste0(rdata.dir, "traumabase_tbi_", length(confounder_names), 
+                       "confounders_", length(covariate_names), 
+                       "variables_imputed_famd.RData"))
+} else {
+  ncp <- 6
+  df.imp.pc <- get_FAMD(df.na, seed = 0, ncp=ncp, Method="Regularized", 
+                        scale=T, threshold = 1e-06)
+  
+  save(df.imp.pc, file=paste0(rdata.dir, "traumabase_tbi_", 
+                              length(confounder_names), 
+                              "confounders_", length(covariate_names), 
+                              "variables_imputed_famd.RData"))
+
+}
+```
+
+
+It is possible that during the loading of the imputed data set, certain 
+variables are not cast correctly. We check that the variable types are all correct
+according to the specified types in `binary_names` and `categorical_names`.
+```{r check_types_famd, echo=F}
+for (variable in binary_names) {
+  if (!is.factor(df.imp.pc[, variable]) & length(unique(df.imp.pc[, variable]))==2) {
+    df.imp.pc[, variable] <- as.factor(df.imp.pc[, variable])
+    levels(df.imp.pc[, variable]) <- c(FALSE, TRUE)
+  }
+}
+for (variable in categorical_names) {
+  if (!is.factor(df.imp.pc[, variable])) {
+    df.imp.pc[, variable] <- as.factor(df.imp.pc[, variable])
+  }
+}
+```
+
+
+## MICE
+
+We also prepare a multiple imputation analysis, using the `mice` package. 
+We impute the data `m=5` times.
+
+```{r mice_impute}
+if (file.exists(paste0(rdata.dir, "traumabase_tbi_", length(confounder_names), 
+                       "confounders_", length(covariate_names), 
+                       "variables_imputed_mice.RData"))) {
+  load(file=paste0(rdata.dir, "traumabase_tbi_", length(confounder_names), 
+                       "confounders_", length(covariate_names), 
+                       "variables_imputed_mice.RData"))
+} else {
+  df.imp.mice <- get_MICE(df.na, seed=0, m=5)
+  save(df.imp.mice, file=paste0(rdata.dir, "traumabase_tbi_", 
+                                length(confounder_names), "confounders_", 
+                                length(covariate_names), 
+                                "variables_imputed_mice.RData"))
+}
+```
+
+Again we check and correct the variable types.
+```{r check_types_mice, echo=F}
+for (variable in binary_names) {
+  for (k in 1:length(df.imp.mice)){
+    if (!is.factor(df.imp.mice[[k]][, variable]) & length(unique(df.imp.mice[[k]][, variable]))==2) {
+      df.imp.mice[[k]][, variable] <- as.factor(df.imp.mice[[k]][, variable])
+      levels(df.imp.mice[[k]][, variable]) <- c(FALSE, TRUE)
+    }
+  }
+}
+for (variable in categorical_names) {
+  for (k in 1:length(df.imp.mice)){
+    if (!is.factor(df.imp.mice[[k]][, variable])) {
+      df.imp.mice[[k]][, variable] <- as.factor(df.imp.mice[[k]][, variable])
+    }
+  }
+}
+```
+
+
+# ATE estimation
+
+We are interested in estimating the causal effect of TXA on the mortality of 
+TBI patients, along the different strata.
+
+Although most of the patients receive multiple treatments (in pre-hospital and 
+hospital phase) and we have records of these other treatments (for instance 
+osmotherapy, fibrinogene, etc.) we are only considering the effect of TXA on 
+in-hospital mortality.
+
+
+## IPW
+
+### On imputed data
+
+```{r ipw_ate, warning=FALSE, echo=F}
+results_ipw_imp_list <- list()
+results_ipw_imp <- data.frame(matrix(ncol=8, nrow=0), row.names = NULL)
+colnames(results_ipw_imp) <- c("Estimand",
+                               "Imputation.method", 
+                               "PS.estimation",
+                               "Mask",
+                               "Stratum",
+                               "ATE.normalized", 
+                               "STD.ATE.normalized",
+                               "ATE.unnormalized")
+
+data_list <- list(list("pc.imp", df.imp.pc),
+                  list("mice", df.imp.mice))
+
+methods_list <- list("glm", "grf.ate")
+
+weights_list <- list("all", "treated", "control", "overlap")
+weights_trim_list <- list(0.999, 0.999, 0.999, 1)
+estimands_list <- list("ATE", "ATT", "ATC", "ATE_overlap")
+
+idx <- 1
+
+for (use.mask in c(FALSE, TRUE)){
+  for (l in 1:length(weights_list)){
+    for (i in 1:length(data_list)){
+      if (data_list[[i]][[1]]=="mice"){
+        confounders <- list()
+        mask <- NULL
+        outcome <- treatment <- list()
+        if (use.mask) mask <- list()
+        for (k in 1:length(data_list[[i]][[2]])){
+          confounders[[k]] <- data_list[[i]][[2]][[k]] %>% 
+                                dplyr::select(c(only_treatment_pred_names, confounder_names))
+    
+  
+          if (use.mask){
+            mask[[k]] <- is.na(X.na[, c(only_treatment_pred_names, confounder_names)])
+            mask[[k]] <- mask[[k]][,sapply(data.frame(mask[[k]] ), FUN = function(x) length(unique(x))==2)]
+          }
+        }
+        
+      }
+        
+      else {
+        confounders <- data_list[[i]][[2]] %>% 
+                          dplyr::select(c(only_treatment_pred_names, confounder_names))
+        
+        mask <- NULL
+        if (use.mask){
+          mask <- is.na(X.na[, c(only_treatment_pred_names, confounder_names)])
+          mask <- mask[,sapply(data.frame(mask), FUN = function(x) length(unique(x))==2)]
+        }
+       }
+      
+      
+      
+      for (j in 1:length(methods_list)){
+        if (data_list[[i]][[1]]== "mice"){
+          for (stratum in strata) {
+            tmp <- c()
+            for (k in 1:length(data_list[[i]][[2]])){
+              stratum.rows <- which(eval(parse(text=stratum[[2]])))
+              confounders_stratum <- confounders[[k]][stratum.rows,]
+              if (!is.null(mask[[k]])){
+                mask_stratum <- mask[[k]][stratum.rows,]
+              } else {
+                mask_stratum <- NULL
+              }
+              Y_stratum <- Y[stratum.rows]
+              W_stratum <- W[stratum.rows]
+              tmp <- rbind(tmp, ipw(X=confounders_stratum, 
+                                    outcome = Y_stratum, treat = as.logical(W_stratum),
+                                    mask = mask_stratum,
+                                    ps.method = methods_list[[j]], 
+                                    target = weights_list[[l]], 
+                                    seed=seed, 
+                                    trimming_weight=weights_trim_list[[l]]))
+            }
+            tmp[,3] <- tmp[,3]^2*n
+            results_ipw_imp_list[[idx]] <- apply(tmp, 2, mean)
+            results_ipw_imp_list[[idx]][[3]] <- sqrt(results_ipw_imp_list[[idx]][[3]] +
+                                                  (1+ 1/length(data_list[[i]][[2]]))*sum((tmp[,2] - results_ipw_imp_list[[idx]][[2]])^2)/(length(data_list[[i]][[2]])-1))/sqrt(length(stratum.rows))
+            results_ipw_imp <- rbind(results_ipw_imp,
+                                   data.frame("Estimand" = estimands_list[[l]],
+                                              "Imputation.method" = data_list[[i]][[1]],
+                                              "PS.estimation" = methods_list[[j]],
+                                              "Mask" = use.mask,
+                                              "Stratum" = stratum[[1]],
+                                              "ATE.normalized" = results_ipw_imp_list[[idx]][[2]],
+                                              "STD.ATE.normalized" = results_ipw_imp_list[[idx]][[3]],
+                                              "ATE.unnormalized" = results_ipw_imp_list[[idx]][[1]]))
+            idx <- idx+1
+          }
+        }
+        else {
+          for (stratum in strata) {
+            stratum.rows <- which(eval(parse(text=stratum[[2]])))
+            confounders_stratum <- confounders[stratum.rows,]
+            if (!is.null(mask)){
+                mask_stratum <- mask[stratum.rows,]
+              } else {
+                mask_stratum <- NULL
+              }
+            Y_stratum <- Y[stratum.rows]
+            W_stratum <- W[stratum.rows]
+            results_ipw_imp_list[[idx]] <- ipw(X=confounders_stratum, 
+                                               outcome = Y_stratum, treat = as.logical(W_stratum),
+                                               mask = mask_stratum,
+                                               ps.method = methods_list[[j]], target = weights_list[[l]], 
+                                               seed=seed, trimming_weight=weights_trim_list[[l]])
+            
+            results_ipw_imp <- rbind(results_ipw_imp,
+                                   data.frame("Estimand" = estimands_list[[l]],
+                                              "Imputation.method" = data_list[[i]][[1]],
+                                              "PS.estimation" = methods_list[[j]],
+                                              "Mask" = use.mask,
+                                              "Stratum" = stratum[[1]],
+                                              "ATE.normalized" = results_ipw_imp_list[[idx]][[2]],
+                                              "STD.ATE.normalized" = results_ipw_imp_list[[idx]][[3]],
+                                              "ATE.unnormalized" = results_ipw_imp_list[[idx]][[1]]))
+            idx <- idx+1
+          }
+        }
+      }
+    }
+  }
+}
+
+knitr::kable(results_ipw_imp, caption = "IPW estimations", digits = 2)
+```
+
+
+
+
+### MIA+grf
+```{r ipw_at_mia, warning=FALSE, echo=F}
+results_ipw_mia_list <- list()
+results_ipw_mia <- data.frame(matrix(ncol=8, nrow=0), row.names = NULL)
+colnames(results_ipw_mia) <- c("Estimand",
+                               "Imputation.method", 
+                               "PS.estimation", 
+                               "Mask",
+                               "Stratum",
+                               "ATE.normalized", 
+                               "STD.ATE.normalized",
+                               "ATE.unnormalized")
+
+
+
+weights_list <- list("all", "treated", "control", "overlap")
+weights_trim_list <- list(0.999, 0.999, 0.999, 1)
+estimands_list <- list("ATE", "ATT", "ATC", "ATE_overlap")
+
+    
+idx <- 1
+
+for (use.mask in c(TRUE)){
+  for (k in 1:length(weights_list)){
+    confounders <- X.na %>%
+              dplyr::select(c(only_treatment_pred_names, confounder_names))
+    
+    mask <- NULL
+    if (use.mask){
+      mask <- is.na(X.na[, c(only_treatment_pred_names, confounder_names)])
+    }
+    for (stratum in strata) {
+      stratum.rows <- which(eval(parse(text=stratum[[2]])))
+      confounders_stratum <- confounders[stratum.rows,]
+      if (!is.null(mask)){
+          mask_stratum <- mask[stratum.rows,]
+        } else {
+          mask_stratum <- NULL
+        }
+      Y_stratum <- Y[stratum.rows]
+      W_stratum <- W[stratum.rows]
+      results_ipw_mia_list[[idx]] <- ipw(X=confounders_stratum, ps.method="grf.ate", 
+                                         mask=mask_stratum,
+                                         treat=as.logical(W_stratum), outcome=Y_stratum, 
+                                         target=weights_list[[k]], 
+                                         seed=seed, 
+                                         trimming_weight=weights_trim_list[[k]])
+         
+          
+      results_ipw_mia <- rbind(results_ipw_mia,
+                                data.frame("Estimand" = estimands_list[[k]],
+                                           "Imputation.method" = "mia",
+                                           "PS.estimation" = "grf.ate",
+                                           "Mask" = use.mask,
+                                           "Stratum" = stratum[[1]],
+                                           "ATE.normalized" = results_ipw_mia_list[[idx]][[2]],
+                                           "STD.ATE.normalized" = results_ipw_mia_list[[idx]][[3]],
+                                           "ATE.unnormalized" = results_ipw_mia_list[[idx]][[1]]))
+          
+      idx <- idx+1
+    }
+  }
+}
+
+knitr::kable(results_ipw_mia, caption = "ipw ATE estimations on mia covariates", digits = 2)
+```
+
+
+## DR
+
+### On imputed data
+
+```{r dr_imp, warning=F, echo=F}
+results_dr_imp_list <- list()
+results_dr_imp <- data.frame(matrix(ncol=7, nrow=0), row.names = NULL)
+colnames(results_dr_imp) <- c("Estimand",
+                              "Imputation.method", 
+                              "PS.estimation",
+                              "Mask",
+                              "Stratum",
+                              "ATE", 
+                              "STD")
+
+data_list <- list(list("pc.imp", df.imp.pc),
+                  list("mice", df.imp.mice))
+
+methods_list <- list("glm.grf", "grf.ate")
+
+weights_list <- list("all", "treated", "control", "overlap")
+weights_trim_list <- list(0.999, 0.999, 0.999, 1)
+estimands_list <- list("ATE", "ATT", "ATC", "ATE_overlap")
+
+idx <- 1
+
+for (use.mask in c(FALSE, TRUE)){
+  for (l in 1:length(weights_list)){
+    for (i in 1:length(data_list)){
+      if (data_list[[i]][[1]]=="mice"){
+        confounders <- treatment_regressors <- outcome_regressors <- clusters <- list()
+        mask.confounders <- mask.treatment_regressors <- mask.outcome_regressors <- NULL
+        if (use.mask) mask.confounders <- mask.treatment_regressors <- mask.outcome_regressors <-list()
+        for (k in 1:length(data_list[[i]][[2]])){
+          confounders[[k]] <- data_list[[i]][[2]][[k]] %>% 
+                                dplyr::select(confounder_names)
+          treatment_regressors[[k]] <- data_list[[i]][[2]][[k]] %>% 
+                                dplyr::select(c(only_treatment_pred_names,confounder_names))
+          outcome_regressors[[k]] <- data_list[[i]][[2]][[k]] %>% 
+                                dplyr::select(c(only_outcome_pred_names,confounder_names))
+          if (length(cluster_names)>0) {
+            clusters[[k]] <- data_list[[i]][[2]][[k]] %>% 
+                                dplyr::select(cluster_names) %>%
+                                apply(MARGIN=2, as.numeric)
+          }
+          
+          if (use.mask){
+            mask.confounders[[k]] <- is.na(X.na[,confounder_names])
+            mask.treatment_regressors[[k]] <- is.na(X.na[c(only_treatment_pred_names, confounder_names)])
+            mask.outcome_regressors[[k]] <- is.na(X.na[c(only_outcome_pred_names, confounder_names)])
+            
+            mask.confounders[[k]] <- data.frame(mask.confounders[[k]][,sapply(data.frame(mask.confounders[[k]]), FUN = function(x) length(unique(x))==2)])
+            mask.treatment_regressors[[k]] <- data.frame(mask.treatment_regressors[[k]][,sapply(data.frame(mask.treatment_regressors[[k]]), FUN = function(x) length(unique(x))==2)])
+            mask.outcome_regressors[[k]] <- data.frame(mask.outcome_regressors[[k]][,sapply(data.frame(mask.outcome_regressors[[k]]), FUN = function(x) length(unique(x))==2)])
+          }
+        }
+      }
+      
+      else {    
+        clusters <- NULL
+        confounders <- data_list[[i]][[2]] %>% 
+                            dplyr::select(confounder_names)
+        treatment_regressors <- data_list[[i]][[2]] %>% 
+                                dplyr::select(c(only_treatment_pred_names,confounder_names))
+        outcome_regressors <- data_list[[i]][[2]] %>% 
+                                dplyr::select(c(only_outcome_pred_names,confounder_names))
+        clusters <- data_list[[i]][[2]] %>% 
+                        dplyr::select(cluster_names) %>%
+                        apply(MARGIN=2, as.numeric)
+        mask.confounders <- mask.treatment_regressors <- mask.outcome_regressors <- NULL
+        if (use.mask){
+          mask.confounders <- is.na(X.na[,confounder_names])
+          mask.treatment_regressors<- is.na(X.na[c(only_treatment_pred_names, confounder_names)])
+          mask.outcome_regressors <- is.na(X.na[c(only_outcome_pred_names, confounder_names)])
+            
+          mask.confounders <- data.frame(mask.confounders[,sapply(data.frame(mask.confounders), FUN = function(x) length(unique(x))==2)])
+          mask.treatment_regressors <- data.frame(mask.treatment_regressors[,sapply(data.frame(mask.treatment_regressors), FUN = function(x) length(unique(x))==2)])
+          mask.outcome_regressors <- data.frame(mask.outcome_regressors[,sapply(data.frame(mask.outcome_regressors), FUN = function(x) length(unique(x))==2)])
+        }
+      }
+      
+      for (j in 1:length(methods_list)){
+        if (data_list[[i]][[1]] == "mice"){
+          for (stratum in strata) {
+            tmp <- c()
+            for (k in 1:length(data_list[[i]][[2]])){
+              stratum.rows <- which(eval(parse(text=stratum[[2]])))
+              confounders_stratum <- confounders[[k]][stratum.rows,]
+              treatment_regressors_stratum <- treatment_regressors[[k]][stratum.rows,]
+              outcome_regressors_stratum <- outcome_regressors[[k]][stratum.rows,]
+              if (!is.null(mask.confounders[[k]])){
+                mask.confounders_stratum <- mask.confounders[[k]][stratum.rows,]
+                mask.treatment_regressors_stratum <- mask.treatment_regressors[[k]][stratum.rows,]
+                mask.outcome_regressors_stratum <- mask.outcome_regressors[[k]][stratum.rows,]
+              } else {
+                mask.confounders_stratum <- NULL
+                mask.treatment_regressors_stratum <- NULL
+                mask.outcome_regressors_stratum <- NULL
+              }
+              Y_stratum <- Y[stratum.rows]
+              W_stratum <- W[stratum.rows]
+              if (length(cluster_names)==0){
+                cls <- NULL
+              } else {
+                cls <- clusters[[k]][stratum.rows,]
+              }
+              
+              tmp <- rbind(tmp, dr(X=confounders_stratum, 
+                                   X.for.ps = treatment_regressors_stratum,
+                                   X.for.outcome = outcome_regressors_stratum,
+                                   outcome = Y_stratum, treat = as.logical(W_stratum),
+                                   mask = mask.confounders_stratum, 
+                                   mask.for.ps = mask.treatment_regressors_stratum,
+                                   mask.for.outcome = mask.outcome_regressors_stratum,
+                                   ps.method = methods_list[[j]], 
+                                   out.method = methods_list[[j]],
+                                   target = weights_list[[l]], 
+                                   seed=seed, 
+                                   trimming_weight=weights_trim_list[[l]],
+                                   clusters=cls)) 
+            }
+            tmp[,2] <- tmp[,2]^2*n
+            results_dr_imp_list[[idx]] <- apply(tmp, 2, mean)
+            results_dr_imp_list[[idx]][[2]] <- sqrt(results_dr_imp_list[[idx]][[2]] +
+                                                (1+ 1/length(data_list[[i]][[2]]))*sum((tmp[,1] - results_dr_imp_list[[idx]][[1]])^2)/(length(data_list[[i]][[2]])-1))/sqrt(length(stratum.rows))
+            results_dr_imp <- rbind(results_dr_imp,
+                                   data.frame("Estimand" = estimands_list[[l]],
+                                              "Imputation.method" = data_list[[i]][[1]],
+                                              "PS.estimation" = methods_list[[j]],
+                                              "Mask" = use.mask,
+                                              "Stratum" = stratum[[1]],
+                                              "ATE" = results_dr_imp_list[[idx]][[1]],
+                                              "STD" = results_dr_imp_list[[idx]][[2]]))
+        
+            idx <- idx+1
+          }
+        }  
+        else {
+          for (stratum in strata) {
+            stratum.rows <- which(eval(parse(text=stratum[[2]])))
+            confounders_stratum <- confounders[stratum.rows,]
+            treatment_regressors_stratum <- treatment_regressors[stratum.rows,]
+            outcome_regressors_stratum <- outcome_regressors[stratum.rows,]
+            if (!is.null(mask.confounders)){
+              mask.confounders_stratum <- mask.confounders[stratum.rows,]
+              mask.treatment_regressors_stratum <- mask.treatment_regressors[stratum.rows,]
+              mask.outcome_regressors_stratum <- mask.outcome_regressors[stratum.rows,]
+            } else {
+              mask.confounders_stratum <- NULL
+              mask.treatment_regressors_stratum <- NULL
+              mask.outcome_regressors_stratum <- NULL
+            }
+            Y_stratum <- Y[stratum.rows]
+            W_stratum <- W[stratum.rows]
+            clusters_stratum <- clusters[stratum.rows,]
+            results_dr_imp_list[[idx]] <- dr(X=confounders_stratum, 
+                                             X.for.ps = treatment_regressors_stratum,
+                                             X.for.outcome = outcome_regressors_stratum,
+                                             outcome = Y_stratum, treat = as.logical(W_stratum),
+                                             mask = mask.confounders_stratum, 
+                                             mask.for.ps = mask.treatment_regressors_stratum,
+                                             mask.for.outcome = mask.outcome_regressors_stratum,
+                                             ps.method = methods_list[[j]], 
+                                             out.method = methods_list[[j]],
+                                             target = weights_list[[l]], 
+                                             seed=seed, 
+                                             trimming_weight=weights_trim_list[[l]],
+                                             clusters=clusters_stratum)
+            results_dr_imp <- rbind(results_dr_imp,
+                                   data.frame("Estimand" = estimands_list[[l]],
+                                              "Imputation.method" = data_list[[i]][[1]],
+                                              "PS.estimation" = methods_list[[j]],
+                                              "Mask" = use.mask,
+                                              "Stratum" = stratum[[1]],
+                                              "ATE" = results_dr_imp_list[[idx]][[1]],
+                                              "STD" = results_dr_imp_list[[idx]][[2]]))
+        
+            idx <- idx+1
+        }
+      }
+      }
+    }
+  }
+}
+knitr::kable(results_dr_imp, caption = "DR estimations", digits = 2)
+```
+
+
+
+### MIA+grf
+```{r dr_at_mia, warning=FALSE, echo=F}
+results_dr_mia_list <- list()
+results_dr_mia <- data.frame(matrix(ncol=7, nrow=0), row.names = NULL)
+colnames(results_dr_mia) <- c("Estimand",
+                              "Imputation.method",
+                              "PS.estimation",
+                              "Mask",
+                              "Stratum",
+                              "ATE", 
+                              "STD")
+
+weights_list <- list("all", "treated", "control", "overlap")
+weights_trim_list <- list(0.999, 0.999, 0.999, 1)
+estimands_list <- list("ATE", "ATT", "ATC", "ATE_overlap")
+
+    
+idx <- 1
+
+for (use.mask in c(FALSE, TRUE)){
+  for (k in 1:length(weights_list)){
+    clusters <- NULL
+    confounders <- X.na %>% 
+                      dplyr::select(confounder_names)
+    treatment_regressors <- X.na %>% 
+                              dplyr::select(c(only_treatment_pred_names, confounder_names))
+    outcome_regressors <- X.na %>% 
+                            dplyr::select(c(only_outcome_pred_names, confounder_names))
+    clusters <- X.na %>% 
+                   dplyr::select(cluster_names) %>%
+                   apply(MARGIN=2, as.numeric)
+    mask.confounders <- mask.treatment_regressors <- mask.outcome_regressors <- NULL
+    if (use.mask){
+      mask.confounders <- is.na(X.na[,confounder_names])
+      mask.treatment_regressors <- is.na(X.na[setdiff(c(only_treatment_pred_names,confounder_names), cluster_names)])
+      mask.outcome_regressors <- is.na(X.na[setdiff(c(only_outcome_pred_names,confounder_names), cluster_names)])
+        
+      mask.confounders <- data.frame(mask.confounders[,sapply(data.frame(mask.confounders), FUN = function(x) length(unique(x))==2)])
+      mask.treatment_regressors <- data.frame(mask.treatment_regressors[,sapply(data.frame(mask.treatment_regressors), FUN = function(x) length(unique(x))==2)])
+      mask.outcome_regressors <- data.frame(mask.outcome_regressors[,sapply(data.frame(mask.outcome_regressors), FUN = function(x) length(unique(x))==2)])
+    }
+    for (stratum in strata) {
+      stratum.rows <- which(eval(parse(text=stratum[[2]])))
+      confounders_stratum <- confounders[stratum.rows,]
+      treatment_regressors_stratum <- treatment_regressors[stratum.rows,]
+      outcome_regressors_stratum <- outcome_regressors[stratum.rows,]
+      if (!is.null(mask.confounders)){
+        mask.confounders_stratum <- mask.confounders[stratum.rows,]
+        mask.treatment_regressors_stratum <- mask.treatment_regressors[stratum.rows,]
+        mask.outcome_regressors_stratum <- mask.outcome_regressors[stratum.rows,]
+      } else {
+        mask.confounders_stratum <- NULL
+        mask.treatment_regressors_stratum <- NULL
+        mask.outcome_regressors_stratum <- NULL
+      }
+      Y_stratum <- Y[stratum.rows]
+      W_stratum <- W[stratum.rows]
+      clusters_stratum <- clusters[stratum.rows,]
+      results_dr_mia_list[[idx]] <- dr(X=confounders, 
+                                       X.for.ps = treatment_regressors,
+                                       X.for.outcome = outcome_regressors,
+                                       outcome = Y, treat = as.logical(W),
+                                       mask = mask.confounders, 
+                                       mask.for.ps = mask.treatment_regressors,
+                                       mask.for.outcome = mask.outcome_regressors,
+                                       ps.method = "grf.ate", out.method = "grf.ate",
+                                       target = weights_list[[k]], 
+                                       seed=seed, 
+                                       trimming_weight=weights_trim_list[[k]],
+                                       clusters=clusters)
+           
+            
+      results_dr_mia <- rbind(results_dr_mia,
+                              data.frame("Estimand" = estimands_list[[k]],
+                                         "Imputation.method" = "mia",
+                                         "PS.estimation" = "grf.ate",
+                                         "Mask" = use.mask,
+                                         "Stratum" = stratum[[1]],
+                                         "ATE" = results_dr_mia_list[[idx]][[1]],
+                                         "STD" = results_dr_mia_list[[idx]][[2]]))
+      
+      idx <- idx+1
+    }
+  }
+}
+
+knitr::kable(results_dr_mia, caption = "DR ATE estimations on mia covariates", digits = 2)
+```
+
+
+## Save results
+```{r save_results}
+results_dr <- rbind(results_dr_imp,
+                    results_dr_mia)
+results_ipw <- rbind(results_ipw_imp,
+                     results_ipw_mia)
+save(results_dr, results_ipw, file = paste0(rdata.dir,
+                                            Sys.Date(),
+                                            "_large_data_strata_17confounders_ate.RData"))
+```
+
+
+# Results
+## Plots
+
+We will plot the results for the ATE estimation. Alternatively, you can also plot the
+results for the other estimands (in the call of the function `plot_treatment_effect`, set `estimand` to `ATT`, `ATC` or `ATE_overlap`).
+
+
+```{r function_plot_combined, echo=F}
+plot_stratified_treatment_effect <- function(res_dr, res_ipw, estimand, ps.estimation=c("grf", "grf.ate"), 
+                                  imputation.method=c("pc.imp","mice","mia"),
+                                  mask=TRUE,
+                                  strata=c("mild_moderate", "severe"),
+                                  y.min=NULL,
+                                  y.max=NULL){ 
+  results_dr_ate <- res_dr %>%
+                       filter(Estimand == estimand & PS.estimation %in% ps.estimation &
+                              Mask == mask &
+                              Stratum %in% strata &
+                              tolower(Imputation.method) %in% imputation.method)
+
+  results_dr_ate$CI.inf<- results_dr_ate$ATE - 1.96*results_dr_ate$STD
+  results_dr_ate$CI.sup <- results_dr_ate$ATE + 1.96*results_dr_ate$STD
+
+
+  results_ipw_ate <- res_ipw %>%
+                       filter(Estimand == estimand & PS.estimation %in% ps.estimation &
+                              Mask == mask &
+                              Stratum %in% strata &
+                              tolower(Imputation.method) %in% imputation.method) 
+  
+  results_ipw_ate$ATE <- results_ipw_ate$ATE.normalized
+  results_ipw_ate$STD <- results_ipw_ate$STD.ATE.normalized
+  
+  results_ipw_ate$CI.inf <- results_ipw_ate$ATE - 1.96*results_ipw_ate$STD
+  results_ipw_ate$CI.sup <- results_ipw_ate$ATE + 1.96*results_ipw_ate$STD
+
+
+  results_ipw_ate <- dplyr::select(results_ipw_ate, -c("ATE.normalized","ATE.unnormalized",
+                                                       "STD.ATE.normalized"))
+
+  results_ate <- rbind(cbind(results_dr_ate, "type"=rep("dr", dim(results_dr_ate)[1])),
+                       cbind(results_ipw_ate,"type"=rep("ipw", dim(results_ipw_ate)[1])))
+  results_ate$type <- as.factor(results_ate$type)
+
+  results_ate$PS.estimation[which(results_ate$PS.estimation=="glm.grf")] <- "glm"
+  
+  if ("grf" %in% ps.estimation & !("glm" %in% ps.estimation)){
+    levels(results_ate$PS.estimation) <- rep("grf.ate", length(levels(results_ate$PS.estimation)))
+  }
+  results_ate$Imputation.set <- interaction(results_ate$Imputation.method,
+                                            results_ate$PS.estimation)
+
+  y.min <- min(c(y.min, min(ate_raw$ate_raw), results_ate$CI.inf), na.rm=T)
+  y.min <- if_else(y.min<0, y.min*1.1, y.min*0.9)
+  y.max <- max(c(y.max, max(ate_raw$ate_raw), results_ate$CI.sup), na.rm=T)
+  y.max <- if_else(y.max<0, y.max*0.9, y.max*1.1)
+  
+  labels <- sort(c("mild_moderate.pc.imp" = "Mild/moderate",
+              "severe.pc.imp" ="Severe",
+              "mild_moderate.mice" ="Mild/moderate",
+              "severe.mice" = "Severe",
+              "mild_moderate.mia" ="Mild/moderate",
+              "severe.mia" = "Severe",
+              "both_react.pc.imp" = "Both react",
+              "any_non_react.pc.imp" ="Any non-react",
+              "both_react.mice" = "Both react",
+              "any_non_react.mice" ="Any non-react",
+              "both_react.mia" = "Both react",
+              "any_non_react.mia" ="Any non-react"))
+  
+  results_ate$Stratum.method <- interaction(results_ate$Stratum,
+                                 results_ate$Imputation.method) 
+  
+  ate_raw_plot <- ate_raw %>% filter(Stratum %in% strata)
+  ate_raw_plot <- do.call("rbind", replicate(length(unique(results_ate$Imputation.method)), ate_raw_plot, simplify = FALSE))
+  ate_raw_plot$Imputation.method <- rep(unique(results_ate$Imputation.method), each=length(unique(ate_raw_plot$Stratum)))
+  ate_raw_plot$Stratum.method <- interaction(ate_raw_plot$Stratum,
+                                 ate_raw_plot$Imputation.method) 
+
+  plt <- ggplot(data=results_ate[order(results_ate$Stratum.method),],
+         aes(x=Stratum.method, y = ATE, color=Imputation.method)) +
+         geom_errorbar(aes(ymin=CI.inf, ymax=CI.sup, linetype = type), width=0.8, size=1.5)
+  if (estimand == "ATE") {
+    plt <- plt + geom_errorbar(inherit.aes=F, data=ate_raw_plot, aes(x=Stratum.method, ymin = ate_raw, ymax=ate_raw, colour="ATE naive"), linetype = "dashed", size = 1)
+  }
+  if (synthetic & estimand == "ATE" & !is.null(tau)) {
+    plt <- plt + geom_hline(aes(yintercept=tau, colour="ATE true"), show.legend = T)
+  } else {
+    plt <- plt + geom_hline(aes(yintercept=0), colour="black", show.legend = F)
+  }
+  plt <- plt + 
+          coord_flip() +
+          colScale +
+          theme(axis.text=element_text(size=15),
+                legend.position="bottom",
+                legend.box="vertical", legend.margin=margin(),
+                legend.text=element_text(size=15),
+                legend.title=element_text(size=15),
+                #axis.title.y=element_blank(),
+                #axis.text.y=element_blank(),
+                #axis.ticks.y=element_blank(),
+                panel.background = element_rect(fill="white", colour="black", size=0.5, 
+                                          linetype="solid")) +
+          scale_x_discrete(labels = labels[which(names(labels) %in% results_ate$Stratum.method)],
+                           limits = names(labels)[which(names(labels) %in% results_ate$Stratum.method)],
+                           position="top") +
+    xlab("") +
+    ylab(estimand) +
+    ylim(c(y.min,y.max)) +
+    labs(title=paste0(estimand," estimation"), cex=0.7)
+  
+  return(plt)
+}
+```
+
+```{r combine_results, echo=F, warning = F, message = F}
+# Aggregate IPW results
+results_ipw <- rbind(results_ipw_imp,
+                     results_ipw_mia)
+
+levels(results_ipw$Imputation.method) <- tolower(levels(results_ipw$Imputation.method))
+ 
+# Aggregate DR results
+results_dr <- rbind(results_dr_imp,
+                    results_dr_mia) 
+levels(results_dr$Imputation.method) <- tolower(levels(results_dr$Imputation.method))
+
+if (save_results) {
+  save(results_ipw, results_dr, file=paste0(rdata.dir, Sys.Date(), "_results_ipw_dr.RData"))
+}
+```
+
+### ATE for initial Glasgow stratification
+```{r plot_ate_glasgow, echo=F}
+plt <- plot_stratified_treatment_effect(results_dr, results_ipw, "ATE", ps.estimation=c("glm", "glm.grf"), y.min=-1, y.max=2.1, strata=c("mild_moderate", "severe"))
+print("GLM") 
+print(plt)  
+ggsave(paste0(fig.dir,Sys.Date(),"_large_data_17confounders_glasgow_strata_ipw_dr_ate_glm.pdf"),
+       plot = last_plot(),
+       width=7, height=6)
+
+plt <- plot_stratified_treatment_effect(results_dr, results_ipw, "ATE", ps.estimation=c("grf", "grf.ate"), strata=c("mild_moderate", "severe"))
+print("GRF")
+print(plt)
+ggsave(paste0(fig.dir,Sys.Date(),"_large_data_17confounders_glasgow_strata_ipw_dr_ate_grf.pdf"),
+       plot = last_plot(),
+       width=7, height=6)
+```
+
+### ATE for pupil reactivity
+```{r plot_ate_pupil, echo=F}
+plt <- plot_stratified_treatment_effect(results_dr, results_ipw, "ATE", ps.estimation=c("glm", "glm.grf"), y.min=-0.8, y.max=1, strata=c("both_react", "any_non_react"))
+print("GLM") 
+print(plt)  
+ggsave(paste0(fig.dir,Sys.Date(),"_large_data_17confounders_pupil_strata_ipw_dr_ate_glm.pdf"),
+       plot = last_plot(),
+       width=7, height=6)
+
+plt <- plot_stratified_treatment_effect(results_dr, results_ipw, "ATE", ps.estimation=c("grf", "grf.ate"), strata=c("both_react", "any_non_react"))
+print("GRF")
+print(plt)
+ggsave(paste0(fig.dir,Sys.Date(),"_large_data_17confounders_pupil_strata_ipw_dr_ate_grf.pdf"),
+       plot = last_plot(),
+       width=7, height=6)
+```
+
+<!-- ## Plots -->
+
+<!-- ```{r plot_ate_dr_grf, echo=F, warning = F, message = F} -->
+<!-- # Aggregate DR results -->
+<!-- results_dr <- rbind(results_dr_imp, -->
+<!--                     results_dr_mia) -->
+<!-- levels(results_dr$Imputation.method) <- toupper(levels(results_dr$Imputation.method)) -->
+
+<!-- # Compare ATE estimation with PS obtained by GRF -->
+<!-- results_dr_ate <- results_dr %>% -->
+<!--                      filter(Estimand == "ATE" & PS.estimation %in% c("grf", "grf.ate") & Imputation.method %in% c("MICE","FAMD","MF","-","MIA","MEAN")) %>% -->
+<!--                      filter(!(Imputation.method %in% c("FAMD","MICE")) | (Imputation.method %in% c("FAMD","MICE"))) -->
+
+<!-- # Match ATE estimations with corresponding computed bootstrap CI bounds -->
+<!-- results_dr_ate$CI.inf.p100 <- results_dr_ate$ATE.p100 - 1.96*results_dr_ate$STD.p100 -->
+<!-- results_dr_ate$CI.sup.p100 <- results_dr_ate$ATE.p100 + 1.96*results_dr_ate$STD.p100 -->
+
+
+<!-- results_ate <- cbind(results_dr_ate, "type"=rep("dr", dim(results_dr_ate)[1])) -->
+
+<!-- levels(results_ate$PS.estimation)[which(levels(results_ate$PS.estimation)=="grf")] <- "grf.ate" -->
+
+<!-- knitr::kable(results_ate, caption = "ATE estimations", digits = 2) -->
+
+<!-- results_ate$Imputation.set <- interaction(results_ate$Imputation.method, -->
+<!--                                  results_ate$PS.estimation)  -->
+
+<!-- rows.subset <- which(results_ate$Mask == T)#1:dim(results_ate)[1] -->
+
+<!-- results_ate$Stratum.method <- interaction(results_ate$Stratum, -->
+<!--                                  results_ate$Imputation.method)  -->
+
+
+<!-- ggplot(data=results_ate[intersect(rows.subset, which(results_ate$Imputation.method %in% c("MICE","MIA"))), ],  -->
+<!--        aes(x=Stratum.method, y = ATE.p100, color=Imputation.method)) + -->
+<!--   geom_errorbar(aes(ymin=CI.inf.p100, ymax=CI.sup.p100), width=0.6, size=0.8) + -->
+<!--   geom_line() + -->
+<!--   geom_point() + -->
+<!--   geom_hline(yintercept=0) + -->
+<!--   coord_flip() +  -->
+<!--   colScale + -->
+<!--   theme(axis.text=element_text(size=15)) + -->
+<!--   # scale_x_discrete(labels = c("MIA.grf.ate"="(a) MIA",  -->
+<!--   #                             "MICE.grf.ate" ="(b) imputation (MICE)"), -->
+<!--   #                  limits = rev(c("MIA.grf.ate",  "MICE.grf.ate")), -->
+<!--   #                  position="top") + -->
+<!--   ylab("ATE (in %)") + -->
+<!--   ylim(c(-20,35)) + -->
+<!--   labs(title=paste0("ATE estimation on ", population," patients"), cex=0.7) -->
+
+<!-- #ggsave(paste0(fig.dir,Sys.Date(),"_dr_ate_", population,"patients.pdf"), plot = last_plot()) -->
+<!-- ``` -->
+
+<!-- ```{r plot_ate_ipw1_dr_grf, echo=F, warning = F, message = F} -->
+<!-- # Aggregate DR results -->
+<!-- results_dr <- rbind(results_dr_imp, -->
+<!--                     results_dr_mia, -->
+<!--                     results_dr_mean) -->
+<!-- levels(results_dr$Imputation.method) <- toupper(levels(results_dr$Imputation.method)) -->
+
+<!-- # Compare ATE estimation with PS obtained by GRF -->
+<!-- results_dr_ate <- results_dr %>% -->
+<!--                      filter(Estimand == "ATE" & PS.estimation %in% c("grf", "grf.ate") & Imputation.method %in% c("MICE","FAMD","MF","-","MIA","MEAN")) %>% -->
+<!--                      filter(!(Imputation.method %in% c("FAMD","MICE")) | (Imputation.method %in% c("FAMD","MICE"))) -->
+
+<!-- # Match ATE estimations with corresponding computed bootstrap CI bounds -->
+<!-- results_dr_ate$CI.inf.p100 <- results_dr_ate$ATE.p100 - 1.96*results_dr_ate$STD.p100 -->
+<!-- results_dr_ate$CI.sup.p100 <- results_dr_ate$ATE.p100 + 1.96*results_dr_ate$STD.p100 -->
+
+<!-- # Aggregate IPW results -->
+<!-- results_ipw <- rbind(results_ipw_imp, -->
+<!--                      results_ipw_mia, -->
+<!--                      results_ipw_mean) -->
+
+<!-- levels(results_ipw$Imputation.method) <- toupper(levels(results_ipw$Imputation.method)) -->
+
+<!-- # Compare ATE estimation with PS obtained by GBM -->
+<!-- results_ipw_ate <- results_ipw %>% -->
+<!--                      filter(Estimand == "ATE" & Imputation.method %in% c("MICE","FAMD","MF","-","MIA", "MEAN"))  %>% -->
+<!--                      filter(!(Imputation.method %in% c("FAMD","MICE")) | (Imputation.method %in% c("FAMD","MICE"))) -->
+
+<!-- results_ipw_ate$ATE.p100 <- results_ipw_ate$ATE1.p100 -->
+
+<!-- # Match ATE estimations with corresponding computed bootstrap CI bounds (if available) -->
+<!-- results_ipw_ate$CI.inf.p100 <- results_ipw_ate$ATE.p100 - 1.96*results_ipw_ate$STD.p100 -->
+<!-- results_ipw_ate$CI.sup.p100 <- results_ipw_ate$ATE.p100 + 1.96*results_ipw_ate$STD.p100 -->
+
+
+<!-- results_ipw_ate <- dplyr::select(results_ipw_ate, -c("ATE1.p100")) -->
+
+<!-- results_ate <- rbind(cbind(results_dr_ate, "type"=rep("dr", dim(results_dr_ate)[1])), -->
+<!--                      cbind(results_ipw_ate,"type"=rep("ipw", dim(results_ipw_ate)[1]))) -->
+
+<!-- #levels(results_ate$PS.estimation) <- c("glm", "gbm", "grf.ate", "grf.ate", "saem") -->
+
+<!-- knitr::kable(results_ate, caption = "ATE estimations", digits = 2) -->
+
+<!-- results_ate$Imputation.set <- interaction(results_ate$Imputation.method, -->
+<!--                                  results_ate$PS.estimation) -->
+
+<!-- rows.subset <- which(results_ate$Mask == T)#1:dim(results_ate)[1] -->
+
+<!-- df_plot <- results_ate[intersect(rows.subset, which(results_ate$PS.estimation %in% c("grf", "grf.ate"))), ] -->
+<!-- levels(df_plot$PS.estimation) <- rep("grf.ate", length(levels(df_plot$PS.estimation))) -->
+<!-- df_plot$Imputation.set <- interaction(df_plot$Imputation.method, -->
+<!--                                  df_plot$PS.estimation) -->
+
+<!-- df_plot$Stratum.method <- interaction(df_plot$Stratum, -->
+<!--                                  df_plot$Imputation.method)  -->
+
+
+
+<!-- ggplot(data=df_plot[which(df_plot$Imputation.method %in% c("MICE","MIA")),], -->
+<!--        aes(x=Stratum.method, y = ATE.p100, color=Imputation.method)) + -->
+<!--   geom_errorbar(aes(ymin=CI.inf.p100, ymax=CI.sup.p100, linetype = as.factor(type)), width=0.8, size=0.8) + -->
+<!--   #geom_hline(yintercept = 100*unadjusted_ate, colour = "cyan", linetype = "dashed", size = 0.8) + -->
+<!--   geom_hline(yintercept=0) + -->
+<!--   coord_flip() + -->
+<!--   colScale + -->
+<!--   theme(axis.text=element_text(size=15)) + -->
+<!--   # scale_x_discrete(labels = c("MIA.grf.ate"="(a) MIA", -->
+<!--   #                             "MICE.grf.ate" ="(b) imputation (MICE)"), -->
+<!--   #                  limits = rev(c("MIA.grf.ate", "MICE.grf.ate")), -->
+<!--   #                  position="top") + -->
+<!--   ylab("ATE (in %)") + -->
+<!--   ylim(c(-20,30)) + -->
+<!--   labs(title=paste0("ATE estimation on ", population," patients"), cex=0.7) -->
+
+<!-- ggsave(paste0(fig.dir,Sys.Date(),"_large_data_strata_17confounders_ipw1_dr_ate_", population,"patients.pdf"), plot = last_plot(), -->
+<!--       width=11, height=8.5) -->
+<!-- ``` -->
+
+<!-- ```{r plot_ate_ipw2_dr_grf, echo=F, warning = F, message = F} -->
+<!-- # Aggregate DR results -->
+<!-- results_dr <- rbind(results_dr_imp, -->
+<!--                     results_dr_mia, -->
+<!--                     results_dr_mean) -->
+<!-- levels(results_dr$Imputation.method) <- toupper(levels(results_dr$Imputation.method)) -->
+
+<!-- # Compare ATE estimation with PS obtained by GRF -->
+<!-- results_dr_ate <- results_dr %>% -->
+<!--                      filter(Estimand == "ATE" & PS.estimation %in% c("grf", "grf.ate") & Imputation.method %in% c("MICE","FAMD","MF","-","MIA","MEAN")) %>% -->
+<!--                      filter(!(Imputation.method %in% c("FAMD","MICE")) | (Imputation.method %in% c("FAMD","MICE"))) -->
+
+<!-- # Match ATE estimations with corresponding computed bootstrap CI bounds -->
+<!-- results_dr_ate$CI.inf.p100 <- results_dr_ate$ATE.p100 - 1.96*results_dr_ate$STD.p100 -->
+<!-- results_dr_ate$CI.sup.p100 <- results_dr_ate$ATE.p100 + 1.96*results_dr_ate$STD.p100 -->
+
+<!-- # Aggregate IPW results -->
+<!-- results_ipw <- rbind(results_ipw_imp, -->
+<!--                      results_ipw_mia, -->
+<!--                      results_ipw_mean) -->
+
+<!-- levels(results_ipw$Imputation.method) <- toupper(levels(results_ipw$Imputation.method)) -->
+
+<!-- # Compare ATE estimation with PS obtained by GBM -->
+<!-- results_ipw_ate <- results_ipw %>% -->
+<!--                      filter(Estimand == "ATE" & Imputation.method %in% c("MICE","FAMD","MF","-","MIA", "MEAN"))  %>% -->
+<!--                      filter(!(Imputation.method %in% c("FAMD","MICE")) | (Imputation.method %in% c("FAMD","MICE"))) -->
+
+<!-- # Match ATE estimations with corresponding computed bootstrap CI bounds (if available) -->
+<!-- results_ipw_ate$CI.inf.p100 <- results_ipw_ate$ATE.p100 - 1.96*results_ipw_ate$STD.p100 -->
+<!-- results_ipw_ate$CI.sup.p100 <- results_ipw_ate$ATE.p100 + 1.96*results_ipw_ate$STD.p100 -->
+
+
+<!-- results_ipw_ate <- dplyr::select(results_ipw_ate, -c("ATE1.p100")) -->
+
+<!-- results_ate <- rbind(cbind(results_dr_ate, "type"=rep("dr", dim(results_dr_ate)[1])), -->
+<!--                      cbind(results_ipw_ate,"type"=rep("ipw", dim(results_ipw_ate)[1]))) -->
+
+<!-- #levels(results_ate$PS.estimation) <- c("glm", "gbm", "grf.ate", "grf.ate", "saem") -->
+
+<!-- knitr::kable(results_ate, caption = "ATE estimations", digits = 2) -->
+
+<!-- results_ate$Imputation.set <- interaction(results_ate$Imputation.method, -->
+<!--                                  results_ate$PS.estimation) -->
+
+<!-- rows.subset <- which(results_ate$Mask)#1:dim(results_ate)[1] -->
+
+<!-- df_plot <- results_ate[intersect(rows.subset, which(results_ate$PS.estimation %in% c("grf", "grf.ate"))), ] -->
+<!-- levels(df_plot$PS.estimation) <- rep("grf.ate", length(levels(df_plot$PS.estimation))) -->
+<!-- df_plot$Imputation.set <- interaction(df_plot$Imputation.method, -->
+<!--                                  df_plot$PS.estimation) -->
+
+<!-- df_plot$Stratum.method <- interaction(df_plot$Stratum, df_plot$Imputation.method) -->
+
+<!-- ggplot(data=df_plot[which(df_plot$Imputation.method %in% c("MICE","MIA")),], -->
+<!--        aes(x=Stratum.method, y = ATE.p100, color=Imputation.method)) + -->
+<!--   geom_errorbar(aes(ymin=CI.inf.p100, ymax=CI.sup.p100, linetype = as.factor(type)), width=0.8, size=0.8) + -->
+<!--   #geom_hline(yintercept = 100*unadjusted_ate, colour = "cyan", linetype = "dashed", size = 0.8) + -->
+<!--   geom_hline(yintercept=0) + -->
+<!--   coord_flip() + -->
+<!--   colScale + -->
+<!--   theme(axis.text=element_text(size=15)) + -->
+<!--   # scale_x_discrete(labels = c("MIA.grf.ate"="(a) MIA", -->
+<!--   #                             "MICE.grf.ate" ="(b) imputation (MICE)"), -->
+<!--   #                  limits = rev(c("MIA.grf.ate", "MICE.grf.ate")), -->
+<!--   #                  position="top") + -->
+<!--   ylab("ATE (in %)") + -->
+<!--   ylim(c(-20,30)) + -->
+<!--   labs(title=paste0("ATE estimation on ", population," patients"), cex=0.7) -->
+
+<!-- ggsave(paste0(fig.dir,Sys.Date(),"_large_data_strata_17confounders_ipw_dr_ate_", population,"patients.pdf"), plot = last_plot(), -->
+<!--       width=11, height=8.5) -->
+<!-- ``` -->
+
+
+<!-- ## Glasgow strata -->
+
+<!-- ```{r plot_ate_ipw2_dr_grf_glasgow, echo=F, warning = F, message = F} -->
+<!-- # Aggregate DR results -->
+<!-- results_dr <- rbind(results_dr_imp, -->
+<!--                     results_dr_mia, -->
+<!--                     results_dr_mean) -->
+<!-- levels(results_dr$Imputation.method) <- toupper(levels(results_dr$Imputation.method)) -->
+
+<!-- # Compare ATE estimation with PS obtained by GRF -->
+<!-- results_dr_ate <- results_dr %>% -->
+<!--                      filter(Estimand == "ATE" & PS.estimation %in% c("grf", "grf.ate") & Imputation.method %in% c("MICE","FAMD","MF","-","MIA","MEAN")) %>% -->
+<!--                      filter(!(Imputation.method %in% c("FAMD","MICE")) | (Imputation.method %in% c("FAMD","MICE"))) -->
+
+<!-- # Match ATE estimations with corresponding computed bootstrap CI bounds -->
+<!-- results_dr_ate$CI.inf.p100 <- results_dr_ate$ATE.p100 - 1.96*results_dr_ate$STD.p100 -->
+<!-- results_dr_ate$CI.sup.p100 <- results_dr_ate$ATE.p100 + 1.96*results_dr_ate$STD.p100 -->
+
+
+<!-- # Aggregate IPW results -->
+<!-- results_ipw <- rbind(results_ipw_imp, -->
+<!--                      results_ipw_mia, -->
+<!--                      results_ipw_mean) -->
+
+<!-- levels(results_ipw$Imputation.method) <- toupper(levels(results_ipw$Imputation.method)) -->
+
+<!-- # Compare ATE estimation with PS obtained by GBM -->
+<!-- results_ipw_ate <- results_ipw %>% -->
+<!--                      filter(Estimand == "ATE" & Imputation.method %in% c("MICE","FAMD","MF","-","MIA", "MEAN"))  %>% -->
+<!--                      filter(!(Imputation.method %in% c("FAMD","MICE")) | (Imputation.method %in% c("FAMD","MICE"))) -->
+
+<!-- # Match ATE estimations with corresponding computed bootstrap CI bounds (if available) -->
+<!-- results_ipw_ate$CI.inf.p100 <- results_ipw_ate$ATE.p100 - 1.96*results_ipw_ate$STD.p100 -->
+<!-- results_ipw_ate$CI.sup.p100 <- results_ipw_ate$ATE.p100 + 1.96*results_ipw_ate$STD.p100 -->
+
+
+<!-- results_ipw_ate <- dplyr::select(results_ipw_ate, -c("ATE1.p100")) -->
+
+<!-- results_ate <- rbind(cbind(results_dr_ate, "type"=rep("dr", dim(results_dr_ate)[1])), -->
+<!--                      cbind(results_ipw_ate,"type"=rep("ipw", dim(results_ipw_ate)[1]))) -->
+
+<!-- #levels(results_ate$PS.estimation) <- c("glm", "gbm", "grf.ate", "grf.ate", "saem") -->
+
+<!-- knitr::kable(results_ate, caption = "ATE estimations", digits = 2) -->
+
+<!-- results_ate$Imputation.set <- interaction(results_ate$Imputation.method, -->
+<!--                                  results_ate$PS.estimation) -->
+
+<!-- rows.subset <- which(results_ate$Mask)#1:dim(results_ate)[1] -->
+
+<!-- df_plot <- results_ate[intersect(rows.subset, which(results_ate$PS.estimation %in% c("grf", "grf.ate"))), ] -->
+<!-- levels(df_plot$PS.estimation) <- rep("grf.ate", length(levels(df_plot$PS.estimation))) -->
+<!-- df_plot$Imputation.set <- interaction(df_plot$Imputation.method, -->
+<!--                                  df_plot$PS.estimation) -->
+
+<!-- df_plot <- df_plot[which(df_plot$Stratum %in% c("mild_moderate", "severe")),] -->
+<!-- df_plot$Stratum.method <- interaction(df_plot$Stratum, df_plot$Imputation.method) -->
+
+<!-- ggplot(data=df_plot[which(df_plot$Imputation.method %in% c("MICE","MIA")),], -->
+<!--        aes(x=Stratum.method, y = ATE.p100, color=Imputation.method)) + -->
+<!--   geom_errorbar(aes(ymin=CI.inf.p100, ymax=CI.sup.p100, linetype = as.factor(type)), width=0.8, size=0.8) + -->
+<!--   #geom_hline(yintercept = 100*unadjusted_ate, colour = "cyan", linetype = "dashed", size = 0.8) + -->
+<!--   geom_hline(yintercept=0) + -->
+<!--   coord_flip() + -->
+<!--   colScale + -->
+<!--   theme(axis.text=element_text(size=15)) + -->
+<!--   # scale_x_discrete(labels = c("MIA.grf.ate"="(a) MIA", -->
+<!--   #                             "MICE.grf.ate" ="(b) imputation (MICE)"), -->
+<!--   #                  limits = rev(c("MIA.grf.ate", "MICE.grf.ate")), -->
+<!--   #                  position="top") + -->
+<!--   ylab("ATE (in %)") + -->
+<!--   ylim(c(-25,30)) + -->
+<!--   labs(title=paste0("ATE estimation on ", population," patients"), cex=0.7) -->
+
+<!-- ggsave(paste0(fig.dir,Sys.Date(),"_large_data_glasgow_strata_17confounders_ipw_dr_ate_", population,"patients.pdf"), plot = last_plot(), -->
+<!--       width=11, height=8.5) -->
+<!-- ``` -->
+
+<!-- ## Pupil strata -->
+
+<!-- ```{r plot_ate_ipw2_dr_grf_pupil, echo=F, warning = F, message = F} -->
+<!-- # Aggregate DR results -->
+<!-- results_dr <- rbind(results_dr_imp, -->
+<!--                     results_dr_mia, -->
+<!--                     results_dr_mean) -->
+
+<!-- levels(results_dr$Imputation.method) <- toupper(levels(results_dr$Imputation.method)) -->
+
+<!-- # Compare ATE estimation with PS obtained by GRF -->
+<!-- results_dr_ate <- results_dr %>% -->
+<!--                      filter(Estimand == "ATE" & PS.estimation %in% c("grf", "grf.ate") & Imputation.method %in% c("MICE","FAMD","MF","-","MIA","MEAN")) %>% -->
+<!--                      filter(!(Imputation.method %in% c("FAMD","MICE")) | (Imputation.method %in% c("FAMD","MICE"))) -->
+
+<!-- # Match ATE estimations with corresponding computed bootstrap CI bounds -->
+<!-- results_dr_ate$CI.inf.p100 <- results_dr_ate$ATE.p100 - 1.96*results_dr_ate$STD.p100 -->
+<!-- results_dr_ate$CI.sup.p100 <- results_dr_ate$ATE.p100 + 1.96*results_dr_ate$STD.p100 -->
+
+
+<!-- # Aggregate IPW results -->
+<!-- results_ipw <- rbind(results_ipw_imp, -->
+<!--                      results_ipw_mia, -->
+<!--                      results_ipw_mean) -->
+
+<!-- levels(results_ipw$Imputation.method) <- toupper(levels(results_ipw$Imputation.method)) -->
+
+<!-- # Compare ATE estimation with PS obtained by GBM -->
+<!-- results_ipw_ate <- results_ipw %>% -->
+<!--                      filter(Estimand == "ATE" & Imputation.method %in% c("MICE","FAMD","MF","-","MIA", "MEAN"))  %>% -->
+<!--                      filter(!(Imputation.method %in% c("FAMD","MICE")) | (Imputation.method %in% c("FAMD","MICE"))) -->
+
+<!-- # Match ATE estimations with corresponding computed bootstrap CI bounds (if available) -->
+<!-- results_ipw_ate$CI.inf.p100 <- results_ipw_ate$ATE.p100 - 1.96*results_ipw_ate$STD.p100 -->
+<!-- results_ipw_ate$CI.sup.p100 <- results_ipw_ate$ATE.p100 + 1.96*results_ipw_ate$STD.p100 -->
+
+
+<!-- results_ipw_ate <- dplyr::select(results_ipw_ate, -c("ATE1.p100")) -->
+
+<!-- results_ate <- rbind(cbind(results_dr_ate, "type"=rep("dr", dim(results_dr_ate)[1])), -->
+<!--                      cbind(results_ipw_ate,"type"=rep("ipw", dim(results_ipw_ate)[1]))) -->
+
+<!-- #levels(results_ate$PS.estimation) <- c("glm", "gbm", "grf.ate", "grf.ate", "saem") -->
+
+<!-- knitr::kable(results_ate, caption = "ATE estimations", digits = 2) -->
+
+<!-- results_ate$Imputation.set <- interaction(results_ate$Imputation.method, -->
+<!--                                  results_ate$PS.estimation) -->
+
+<!-- rows.subset <- which(results_ate$Mask)#1:dim(results_ate)[1] -->
+
+<!-- df_plot <- results_ate[intersect(rows.subset, which(results_ate$PS.estimation %in% c("grf", "grf.ate"))), ] -->
+<!-- levels(df_plot$PS.estimation) <- rep("grf.ate", length(levels(df_plot$PS.estimation))) -->
+<!-- df_plot$Imputation.set <- interaction(df_plot$Imputation.method, -->
+<!--                                  df_plot$PS.estimation) -->
+
+<!-- df_plot <- df_plot[which(df_plot$Stratum %in% c("both_react", "any_non_react")),] -->
+<!-- df_plot$Stratum.method <- interaction(df_plot$Stratum, df_plot$Imputation.method) -->
+
+<!-- ggplot(data=df_plot[which(df_plot$Imputation.method %in% c("MICE","MIA")),], -->
+<!--        aes(x=Stratum.method, y = ATE.p100, color=Imputation.method)) + -->
+<!--   geom_errorbar(aes(ymin=CI.inf.p100, ymax=CI.sup.p100, linetype = as.factor(type)), width=0.8, size=0.8) + -->
+<!--   #geom_hline(yintercept = 100*unadjusted_ate, colour = "cyan", linetype = "dashed", size = 0.8) + -->
+<!--   geom_hline(yintercept=0) + -->
+<!--   coord_flip() + -->
+<!--   colScale + -->
+<!--   theme(axis.text=element_text(size=15)) + -->
+<!--   # scale_x_discrete(labels = c("MIA.grf.ate"="(a) MIA", -->
+<!--   #                             "MICE.grf.ate" ="(b) imputation (MICE)"), -->
+<!--   #                  limits = rev(c("MIA.grf.ate", "MICE.grf.ate")), -->
+<!--   #                  position="top") + -->
+<!--   ylab("ATE (in %)") + -->
+<!--   ylim(c(-25,30)) + -->
+<!--   labs(title=paste0("ATE estimation on ", population," patients"), cex=0.7) -->
+
+<!-- ggsave(paste0(fig.dir,Sys.Date(),"_large_data_pupil_strata_17confounders_ipw_dr_ate_", population,"patients.pdf"), plot = last_plot(), -->
+<!--       width=11, height=8.5) -->
+<!-- ``` -->
+
+<!-- # Appendix: plots in French -->
+
+<!-- ```{r french_plot_gcs, echo=F} -->
+<!-- colScale <- scale_colour_manual(name = "Gestion des données manquantes",values = myColors) -->
+
+<!-- df_plot <- results_ate[intersect(rows.subset, which(results_ate$PS.estimation %in% c("grf", "grf.ate"))), ] -->
+<!-- levels(df_plot$PS.estimation) <- rep("grf.ate", length(levels(df_plot$PS.estimation))) -->
+<!-- df_plot$Imputation.set <- interaction(df_plot$Imputation.method, -->
+<!--                                  df_plot$PS.estimation) -->
+
+<!-- df_plot <- df_plot[which(df_plot$Stratum %in% c("mild_moderate", "severe")),] -->
+<!-- df_plot$Stratum.method <- interaction(df_plot$Stratum, df_plot$Imputation.method) -->
+<!-- df_plot$Estimation <- as.factor(df_plot$type) -->
+<!-- ggplot(data=df_plot[which(df_plot$Imputation.method %in% c("MICE","MIA")),], -->
+<!--        aes(x=Stratum.method, y = ATE.p100, color=Imputation.method)) + -->
+<!--   geom_errorbar(aes(ymin=CI.inf.p100, ymax=CI.sup.p100, linetype = Estimation), width=0.8, size=0.8) + -->
+<!--   #geom_hline(yintercept = 100*unadjusted_ate, colour = "cyan", linetype = "dashed", size = 0.8) + -->
+<!--   geom_hline(yintercept=0) + -->
+<!--   coord_flip() + -->
+<!--   colScale + -->
+<!--   theme(axis.text=element_text(size=15), -->
+<!--         legend.position="bottom", -->
+<!--         legend.text=element_text(size=15), -->
+<!--         legend.title=element_text(size=15)) + -->
+<!--   scale_x_discrete(labels = c("severe.MIA"="GCS sévère", -->
+<!--                               "mild_moderate.MIA"="GCS léger à modéré", -->
+<!--                               "severe.MICE"="GCS sévère", -->
+<!--                               "mild_moderate.MICE"="GCS léger à modéré"), -->
+<!--                    limits = c("severe.MIA", "mild_moderate.MIA", -->
+<!--                               "severe.MICE","mild_moderate.MICE"), -->
+<!--                    position="top") + -->
+<!--   xlab("") + -->
+<!--   ylab("ATE (x100)") + -->
+<!--   ylim(c(-25,30)) #+ -->
+<!--   #labs(title=paste0("ATE estimation on ", population," patients"), cex=0.7) -->
+
+<!-- ggsave(paste0(fig.dir,Sys.Date(),"_large_data_glasgow_strata_17confounders_ipw_dr_ate_", population,"patients_francais.pdf"), plot = last_plot(), -->
+<!--       width=11, height=8.5) -->
+<!-- ``` -->
+
+<!-- ```{r french_plot_pupils, echo=F} -->
+<!-- colScale <- scale_colour_manual(name = "Gestion des données manquantes",values = myColors) -->
+
+<!-- df_plot <- results_ate[intersect(rows.subset, which(results_ate$PS.estimation %in% c("grf", "grf.ate"))), ] -->
+<!-- levels(df_plot$PS.estimation) <- rep("grf.ate", length(levels(df_plot$PS.estimation))) -->
+<!-- df_plot$Imputation.set <- interaction(df_plot$Imputation.method, -->
+<!--                                  df_plot$PS.estimation) -->
+
+<!-- df_plot <- df_plot[which(df_plot$Stratum %in% c("both_react", "any_non_react")),] -->
+<!-- df_plot$Stratum.method <- interaction(df_plot$Stratum, df_plot$Imputation.method) -->
+
+<!-- df_plot <- df_plot[which(df_plot$Imputation.method %in% c("MICE","MIA")),] -->
+<!-- df_plot$Estimation <- as.factor(df_plot$type) -->
+<!-- ggplot(data=df_plot[which(df_plot$Imputation.method %in% c("MICE","MIA")),], -->
+<!--        aes(x=Stratum.method, y = ATE.p100, color=Imputation.method)) + -->
+<!--   geom_errorbar(aes(ymin=CI.inf.p100, ymax=CI.sup.p100, linetype = Estimation), width=0.8, size=0.8) + -->
+<!--   #geom_hline(yintercept = 100*unadjusted_ate, colour = "cyan", linetype = "dashed", size = 0.8) + -->
+<!--   geom_hline(yintercept=0) + -->
+<!--   coord_flip() + -->
+<!--   colScale + -->
+<!--   theme(axis.text=element_text(size=15), -->
+<!--         legend.position="bottom", -->
+<!--         legend.text=element_text(size=15), -->
+<!--         legend.title=element_text(size=15)) + -->
+<!--   scale_x_discrete(labels = c("any_non_react.MIA"="Aréactivité pupillaire", -->
+<!--                               "both_react.MIA"="Pupilles réactives", -->
+<!--                               "any_non_react.MICE"="Aréactivité pupillaire", -->
+<!--                               "both_react.MICE"="Pupilles réactives"), -->
+<!--                    limits = c("any_non_react.MIA", "both_react.MIA", -->
+<!--                               "any_non_react.MICE","both_react.MICE"), -->
+<!--                    position="top") + -->
+<!--   xlab("") + -->
+<!--   ylab("ATE (x100)") + -->
+<!--   ylim(c(-25,30)) #+ -->
+<!--   #labs(title=paste0("ATE estimation on ", population," patients"), cex=0.7) -->
+
+<!-- ggsave(paste0(fig.dir,Sys.Date(),"_large_data_pupil_strata_17confounders_ipw_dr_ate_", population,"patients_francais.pdf"), plot = last_plot(), -->
+<!--       width=11, height=8.5) -->
+<!-- ``` -->
+
+
+
+<!-- # Appendix: plots in English (for medical and review papers) -->
+
+<!-- ```{r english_plot_gcs, echo=F} -->
+<!-- colScale <- scale_colour_manual(name = "Missing values handling",values = myColors) -->
+
+<!-- df_plot <- results_ate[intersect(rows.subset, which(results_ate$PS.estimation %in% c("grf", "grf.ate"))), ] -->
+<!-- levels(df_plot$PS.estimation) <- rep("grf.ate", length(levels(df_plot$PS.estimation))) -->
+<!-- df_plot$Imputation.set <- interaction(df_plot$Imputation.method, -->
+<!--                                  df_plot$PS.estimation) -->
+
+<!-- df_plot <- df_plot[which(df_plot$Stratum %in% c("mild_moderate", "severe")),] -->
+<!-- df_plot$Stratum.method <- interaction(df_plot$Stratum, df_plot$Imputation.method) -->
+<!-- df_plot$Estimation <- as.factor(df_plot$type) -->
+<!-- ggplot(data=df_plot[which(df_plot$Imputation.method %in% c("MICE","MIA")),], -->
+<!--        aes(x=Stratum.method, y = ATE.p100, color=Imputation.method)) + -->
+<!--   geom_errorbar(aes(ymin=CI.inf.p100, ymax=CI.sup.p100, linetype = Estimation), width=0.8, size=0.8) + -->
+<!--   #geom_hline(yintercept = 100*unadjusted_ate, colour = "cyan", linetype = "dashed", size = 0.8) + -->
+<!--   geom_hline(yintercept=0) + -->
+<!--   coord_flip() + -->
+<!--   colScale + -->
+<!--   theme(axis.text=element_text(size=15), -->
+<!--         legend.position="bottom", -->
+<!--         legend.text=element_text(size=15), -->
+<!--         legend.title=element_text(size=15)) + -->
+<!--   scale_x_discrete(labels = c("severe.MIA"="Severe GCS", -->
+<!--                               "mild_moderate.MIA"="Mild-to-moderate GCS", -->
+<!--                               "severe.MICE"="Severe GCS", -->
+<!--                               "mild_moderate.MICE"="Mild-to-moderate GCS"), -->
+<!--                    limits = c("severe.MIA", "mild_moderate.MIA", -->
+<!--                               "severe.MICE","mild_moderate.MICE"), -->
+<!--                    position="top") + -->
+<!--   xlab("") + -->
+<!--   ylab("ATE (x100)") + -->
+<!--   ylim(c(-25,30)) #+ -->
+<!--   #labs(title=paste0("ATE estimation on ", population," patients"), cex=0.7) -->
+
+<!-- ggsave(paste0(fig.dir,Sys.Date(),"_large_data_glasgow_strata_17confounders_ipw_dr_ate_", population,"patients_english.pdf"), plot = last_plot(), -->
+<!--       width=11, height=8.5) -->
+<!-- ``` -->
+
+<!-- ```{r english_plot_pupils, echo=F} -->
+<!-- colScale <- scale_colour_manual(name = "Missing values handling",values = myColors) -->
+
+<!-- df_plot <- results_ate[intersect(rows.subset, which(results_ate$PS.estimation %in% c("grf", "grf.ate"))), ] -->
+<!-- levels(df_plot$PS.estimation) <- rep("grf.ate", length(levels(df_plot$PS.estimation))) -->
+<!-- df_plot$Imputation.set <- interaction(df_plot$Imputation.method, -->
+<!--                                  df_plot$PS.estimation) -->
+
+<!-- df_plot <- df_plot[which(df_plot$Stratum %in% c("both_react", "any_non_react")),] -->
+<!-- df_plot$Stratum.method <- interaction(df_plot$Stratum, df_plot$Imputation.method) -->
+
+<!-- df_plot <- df_plot[which(df_plot$Imputation.method %in% c("MICE","MIA")),] -->
+<!-- df_plot$Estimation <- as.factor(df_plot$type) -->
+<!-- ggplot(data=df_plot[which(df_plot$Imputation.method %in% c("MICE","MIA")),], -->
+<!--        aes(x=Stratum.method, y = ATE.p100, color=Imputation.method)) + -->
+<!--   geom_errorbar(aes(ymin=CI.inf.p100, ymax=CI.sup.p100, linetype = Estimation), width=0.8, size=0.8) + -->
+<!--   #geom_hline(yintercept = 100*unadjusted_ate, colour = "cyan", linetype = "dashed", size = 0.8) + -->
+<!--   geom_hline(yintercept=0) + -->
+<!--   coord_flip() + -->
+<!--   colScale + -->
+<!--   theme(axis.text=element_text(size=15), -->
+<!--         legend.position="bottom", -->
+<!--         legend.text=element_text(size=15), -->
+<!--         legend.title=element_text(size=15)) + -->
+<!--   scale_x_discrete(labels = c("any_non_react.MIA"="Mydriasis", -->
+<!--                               "both_react.MIA"="Normal reaction", -->
+<!--                               "any_non_react.MICE"="Mydriasis", -->
+<!--                               "both_react.MICE"="Normal reaction"), -->
+<!--                    limits = c("any_non_react.MIA", "both_react.MIA", -->
+<!--                               "any_non_react.MICE","both_react.MICE"), -->
+<!--                    position="top") + -->
+<!--   xlab("") + -->
+<!--   ylab("ATE (x100)") + -->
+<!--   ylim(c(-25,30)) #+ -->
+<!--   #labs(title=paste0("ATE estimation on ", population," patients"), cex=0.7) -->
+
+<!-- ggsave(paste0(fig.dir,Sys.Date(),"_large_data_pupil_strata_17confounders_ipw_dr_ate_", population,"patients_english.pdf"), plot = last_plot(), -->
+<!--       width=11, height=8.5) -->
+<!-- ``` -->
+
+
+<!-- # Appendix: catdes -->
+
+
+
+<!-- ```{r df_imputeMean} -->
+<!-- df_impute <- get_imputeMeanNA(data_indTBI) -->
+<!-- df_impute$pupils_strata <- as.factor(if_else(df_impute$Pupil.anomaly.ph %in% c('Anisocorie (unilatérale)','Mydriase Bilatérale'), "any_non_react", "both_react")) -->
+<!-- df_impute$gcs_strata <- as.factor(if_else(df_impute$GCS.init <9, "severe", "mild_moderate")) -->
+<!-- ``` -->
+
+<!-- ```{r catdes_pupils} -->
+<!-- tt <- dplyr::select(df_impute, -c("Trauma.center")) -->
+<!-- res.c <- catdes(tt, num.var = which(colnames(tt)=="pupils_strata")) -->
+<!-- pdf(paste0(fig.dir,Sys.Date(),"_large_data_strata_17confounders_catdes_pupils_strata.pdf")) -->
+<!-- plot(res.c) -->
+<!-- dev.off() -->
+<!-- plot(res.c) -->
+<!-- ``` -->
+
+<!-- ```{r catdes_gcs} -->
+<!-- tt <- dplyr::select(df_impute, -c("Trauma.center")) -->
+<!-- res.c <- catdes(tt, num.var = which(colnames(tt)=="gcs_strata")) -->
+<!-- pdf(paste0(fig.dir,Sys.Date(),"_large_data_strata_17confounders_catdes_gcs_strata.pdf")) -->
+<!-- plot(res.c) -->
+<!-- dev.off() -->
+
+<!-- plot(res.c) -->
+<!-- ``` -->
