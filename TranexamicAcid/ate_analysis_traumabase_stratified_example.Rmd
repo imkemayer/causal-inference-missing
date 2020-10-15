@@ -961,23 +961,23 @@ plot_stratified_treatment_effect <- function(res_dr, res_ipw, estimand, ps.estim
 
   plt <- ggplot(data=results_ate[order(results_ate$Stratum.method),],
          aes(x=Stratum.method, y = ATE, color=Imputation.method)) +
-         geom_errorbar(aes(ymin=CI.inf, ymax=CI.sup, linetype = type), width=0.8, size=1.5)
+         geom_errorbar(aes(ymin=CI.inf, ymax=CI.sup, linetype = type), width=0.8, size=1.8)
   if (estimand == "ATE") {
-    plt <- plt + geom_errorbar(inherit.aes=F, data=ate_raw_plot, aes(x=Stratum.method, ymin = ate_raw, ymax=ate_raw, colour="ATE naive"), linetype = "dashed", size = 1)
+    plt <- plt + geom_errorbar(inherit.aes=F, data=ate_raw_plot, aes(x=Stratum.method, ymin = ate_raw, ymax=ate_raw, colour="ATE naive"), linetype = "dashed", size = 1.8)
   }
   if (synthetic & estimand == "ATE" & !is.null(tau)) {
     plt <- plt + geom_hline(aes(yintercept=tau, colour="ATE true"), show.legend = T)
   } else {
-    plt <- plt + geom_hline(aes(yintercept=0), colour="black", show.legend = F)
+    plt <- plt + geom_hline(aes(yintercept=0), colour="black", show.legend = F,size=1.5)
   }
   plt <- plt + 
           coord_flip() +
           colScale +
-          theme(axis.text=element_text(size=15),
+          theme(axis.text=element_text(size=18, face="bold"),
                 legend.position="bottom",
                 legend.box="vertical", legend.margin=margin(),
-                legend.text=element_text(size=15),
-                legend.title=element_text(size=15),
+                legend.text=element_text(size=18, face="bold"),
+                legend.title=element_text(size=16),
                 #axis.title.y=element_blank(),
                 #axis.text.y=element_blank(),
                 #axis.ticks.y=element_blank(),
@@ -1016,7 +1016,7 @@ if (save_results) {
 ```{r plot_ate_glasgow, echo=F}
 plt <- plot_stratified_treatment_effect(results_dr, results_ipw, "ATE", ps.estimation=c("glm", "glm.grf"), y.min=-1, y.max=2.1, strata=c("mild_moderate", "severe"))
 print("GLM") 
-print(plt)  
+print(plt)
 ggsave(paste0(fig.dir,Sys.Date(),"_large_data_17confounders_glasgow_strata_ipw_dr_ate_glm.pdf"),
        plot = last_plot(),
        width=7, height=6)
@@ -1043,5 +1043,5 @@ print("GRF")
 print(plt)
 ggsave(paste0(fig.dir,Sys.Date(),"_large_data_17confounders_pupil_strata_ipw_dr_ate_grf.pdf"),
        plot = last_plot(),
-       width=7, height=6)
+       width=7, height=6) 
 ```

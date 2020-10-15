@@ -55,8 +55,8 @@ library(VIM) # Missing values exploration and visualization
 
 # Define data directory
 data.dir <- "~/Documents/TraumaMatrix/CausalInference/AcideTranexamique/Data/"
-rdata.dir <- "~/Documents/TraumaMatrix/CausalInference/Simulations/causal-inference-missing/TranexamicAcid/LargeTraumabase/RData/"
-fig.dir <- "~/Documents/TraumaMatrix/CausalInference/Simulations/causal-inference-missing/TranexamicAcid/LargeTraumabase/Figures/"
+rdata.dir <- "~/Documents/TraumaMatrix/CausalInference/Simulations/causal-inference-missing/TranexamicAcid/RData/"
+fig.dir <- "~/Documents/TraumaMatrix/CausalInference/Simulations/causal-inference-missing/TranexamicAcid/Figures/"
 
 library(devtools)
 # Load the ATE estimation functions `ipw` and `dr` from the GitHub repository
@@ -824,23 +824,24 @@ plot_treatment_effect <- function(res_dr, res_ipw, estimand, ps.estimation=c("gr
               "mf.glm.grf" = "Latent factors")
   plt <- ggplot(data=df_plot,
          aes(x=Imputation.set, y = ATE, color=Imputation.method)) +
-         geom_errorbar(aes(ymin=CI.inf, ymax=CI.sup, linetype = type), width=0.8, size=1.5)
+         geom_errorbar(aes(ymin=CI.inf, ymax=CI.sup, linetype = type), width=0.8, size=1.8)
   if (estimand == "ATE") {
-    plt <- plt + geom_hline(aes(yintercept = ate_raw, colour = "ATE naive"), linetype = "dashed", size = 1)
+    plt <- plt + geom_hline(aes(yintercept = ate_raw, colour = "ATE naive"), linetype = "dashed", size = 1.8)
   }
   if (synthetic & estimand == "ATE" & !is.null(tau)) {
     plt <- plt + geom_hline(aes(yintercept=tau, colour="ATE true"), show.legend = T)
   } else {
-    plt <- plt + geom_hline(aes(yintercept=0), colour="black", show.legend = F)
+    plt <- plt + geom_hline(aes(yintercept=0), colour="black", show.legend = F, size = 1.5)
   }
   plt <- plt + 
           coord_flip() +
           colScale +
-          theme(axis.text=element_text(size=15),
+          theme(axis.title=element_text(size=16),
+                axis.text=element_text(size=18, face="bold"),
                 legend.position="bottom",
                 legend.box="vertical", legend.margin=margin(),
-                legend.text=element_text(size=15),
-                legend.title=element_text(size=15),
+                legend.text=element_text(size=18, face="bold"),
+                legend.title=element_text(size=16),
                 axis.title.y=element_blank(),
                 axis.text.y=element_blank(),
                 axis.ticks.y=element_blank(),
@@ -883,15 +884,14 @@ print("GLM")
 print(plt)  
 ggsave(paste0(fig.dir,Sys.Date(),"_large_data_17confounders_ipw_dr_ate_glm.pdf"),
        plot = last_plot(),
-       width=7, height=6)
+       width=7, height=6) 
 
 plt <- plot_treatment_effect(results_dr, results_ipw, "ATE", ps.estimation=c("grf", "grf.ate"), y.min=-0.05, y.max=0.58)
 print("GRF")
 print(plt)
 ggsave(paste0(fig.dir,Sys.Date(),"_large_data_17confounders_ipw_dr_ate_grf.pdf"),
        plot = last_plot(),
-       width=7, height=6)
-
+       width=7, height=6) 
 ```
 
 
