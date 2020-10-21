@@ -294,6 +294,21 @@ if (file.exists(paste0(rdata.dir, "traumabase_tbi_ncomp_famd.RData"))) {
 By cross-validation we find `ncp=6` to be the optimal number of components.
 
 ```{r famd_impute}
+# Recode values of imputed categorical variables and recast some numericals variables into integers 
+cast_types = function(i,df, data.num){
+  if (is.factor(df[,i])){
+    df[,i] = plyr::mapvalues(df[,i], from = levels(df[,i]), to = gsub(paste(i,"_",sep=''), "", levels(df[,i])))
+  } else {
+    if(i %in% data.num){
+      df[,i] <- round(df[,i],digits=1)
+    }  else{
+      df[,i] <- as.integer(round(df[,i],digits=0))
+    }
+  }
+  return(df[,i])
+}
+
+
 if (file.exists(paste0(rdata.dir, "traumabase_tbi_", length(confounder_names), 
                        "confounders_", length(covariate_names), 
                        "variables_imputed_famd.RData"))){
@@ -302,8 +317,17 @@ if (file.exists(paste0(rdata.dir, "traumabase_tbi_", length(confounder_names),
                        "variables_imputed_famd.RData"))
 } else {
   ncp <- 6
-  df.imp.pc <- get_FAMD(df.na, seed = 0, ncp=ncp, Method="Regularized", 
-                        scale=T, threshold = 1e-06)
+  df.tmp <- data.frame(X.na, W = as.factor(W), Y = Y)
+  colnames(df.tmp) <- colnames(df.na)
+  df.imp.pc <- data.frame(imputeFAMD(df.tmp, ncp=ncp, seed=seed)$completeObs)
+  
+  data.num <- colnames(df.imp.pc)[which(sapply(df.tmp, FUN=function(x) (is.numeric(x) & !(is.integer(x)))))]
+  for (j in colnames(df.imp.pc)){
+    df.imp.pc[,j] <- cast_types(j, df.imp.pc, data.num)
+  }
+   
+  levels(df.imp.pc$W) <- c(0,1)
+  df.imp.pc$W <- as.numeric(as.character(df.imp.pc$W))
   
   save(df.imp.pc, file=paste0(rdata.dir, "traumabase_tbi_", 
                               length(confounder_names), 
@@ -345,8 +369,13 @@ if (file.exists(paste0(rdata.dir, "traumabase_tbi_", length(confounder_names),
                        "confounders_", length(covariate_names), 
                        "variables_imputed_mice.RData"))
 } else {
-  df.imp.mice <- get_MICE(df.na, seed=0, m=5)
-  save(df.imp.mice, file=paste0(rdata.dir, "traumabase_tbi_", 
+  m=5
+  imp.mice.mids <- mice(df.na, m=m, seed=seed, printFlag=F)
+  df.imp.mice <- list()
+  for (k in 1:m){
+    df.imp.mice[[k]] <- mice::complete(imp.mice.mids, k)
+  }
+  save(df.imp.mice, imp.mice.mids, file=paste0(rdata.dir, "traumabase_tbi_", 
                                 length(confounder_names), "confounders_", 
                                 length(covariate_names), 
                                 "variables_imputed_mice.RData"))
