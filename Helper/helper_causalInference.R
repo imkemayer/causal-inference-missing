@@ -61,9 +61,7 @@ predict_glm <- function(X, treat, seed, family = binomial, regularize=FALSE){
     cv.fit <- glmnet::cv.glmnet(x=x, 
                                 y=treat, alpha = 0,
                                 family = "binomial")
-    glm_mod <- glmnet::glmnet(x=x, y=treat, alpha = 0, family = "binomial",
-                              lambda = cv.fit$lambda.min)
-    pred <- predict(glm_mod, newx = x, type="response")
+    pred <- predict(cv.fit, newx = x, s="lambda.min", type="response")
   } else {
     glm_mod <- train(y = treat,
                      x = X,
@@ -287,7 +285,8 @@ dr <- function(X,
                use.interaction = FALSE,
                subset = NULL,
                regularize = FALSE,
-               clusters=NULL){
+               clusters=NULL,
+               outcome.cont=FALSE){
 
   #' @param X [data.frame] confounders \eqn{n \times p}{n * p}
   #' @param X.for.ps [data.frame] confounders and other predictors of treatment assignment \eqn{n \times (p + p_p)}{n * (p+pp)}
@@ -504,7 +503,7 @@ dr <- function(X,
     options(na.action=na.action)
   } 
   if (ps.method == "glm.grf" & out.method == "glm.grf") {  
-    if (length(unique(outcome))==2){ y = as.factor(outcome) } else { y = outcome }
+    if (length(unique(outcome))==2 & !outcome.cont){ y = as.factor(outcome) } else { y = outcome }
     if (regularize){
       x <- model.matrix(~., data = data.frame(X2))
       if (is.factor(y)){
@@ -515,11 +514,10 @@ dr <- function(X,
                                      lambda = cv.fit$lambda.min)
         y.hat <- predict(lm.fit, newx=x, type="response")
       } else {
-        cv.fit <- glmnet::glmnet(x=x, 
-                                 y=y, alpha = 0, nlambda = 50)
-        lm.fit <- glmnet::glmnet(x=x, y=y, alpha = 0,
-                                     lambda = cv.fit$lambda.min)
-        y.hat <- predict(lm.fit, newx=x)
+        cv.fit <- glmnet::cv.glmnet(x=x, 
+                                 y=y, alpha = 0, 
+                                 family ="gaussian")
+        y.hat <- predict(cv.fit, newx=x, s="lambda.min")
       }
       
     } else { 
@@ -542,9 +540,7 @@ dr <- function(X,
       cv.fit <- glmnet::cv.glmnet(x=x, 
                                   y=as.factor(treat), alpha = 0,
                                   family = "binomial")
-      lm.fit<- glmnet::glmnet(x=x, y=as.factor(treat), alpha = 0, family = "binomial",
-                                lambda = cv.fit$lambda.min)
-      w.hat <- predict(lm.fit, newx=x, type="response")
+      w.hat <- predict(cv.fit, newx=x, s="lambda.min", type="response")
     } else { 
       lm.fit <- train(y=as.factor(treat),
                       x=X1, method="glm",
