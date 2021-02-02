@@ -29,22 +29,28 @@ predict_misaem <- function(X, treat, seed=0, pattern = NULL, use.interaction = F
     xnam2 <- paste("X", col.complete, sep="")
     fmla <- as.formula(paste("~ ", paste0(paste(c(xnam1,rnam), collapse= "+"), # "-1+",
                                           "+",
-                                          paste(kronecker(xnam2, rnam,function(x,r) paste0(x,"*",r)), collapse= "+"))))
+                                          paste(kronecker(xnam2, rnam,function(x,r) paste0(x,"*",r)), collapse= "+")),
+                             "-1"))
     na.action.default <- getOption("na.action")
     options(na.action = "na.pass")
     X <- model.matrix(fmla, data = X)
     options(na.action = na.action.default)
   } 
   
+  na.action.default <- getOption("na.action")
+  options(na.action = "na.pass")
+  X.m <- model.matrix(~.-1, data = X)
+  options(na.action = na.action.default)
+  
   test.boundary <- T
   k <- 0 
   while (test.boundary & k < 10){
-    p.fit <- miss.glm(treat~., data = data.frame(X, "treat"=treat), seed = seed)
+    p.fit <- miss.glm(treat~., data = data.frame(X.m, "treat"=treat), seed = seed)
      
     pr.saem <- NULL
-    try(pr.saem <- predict(p.fit, newdata = X, method='map'))
+    try(pr.saem <- predict(p.fit, newdata = X.m, method='map'))
     if (is.null(pr.saem)){
-      pr.saem <- predict(p.fit, newdata = X, method='impute')
+      pr.saem <- predict(p.fit, newdata = X.m, method='impute')
     }
     test.boundary <- (min(pr.saem)<1e-6 | max(pr.saem)>1-1e-6)
     k <- k+1
@@ -62,7 +68,7 @@ predict_glm <- function(X, treat, seed, family = binomial, regularize=FALSE){
   set.seed(seed)
   
   if (regularize){
-    x <- model.matrix(~., data = X)
+    x <- model.matrix(~.-1, data = X)
     cv.fit <- glmnet::cv.glmnet(x=x, 
                                 y=treat, alpha = 0,
                                 family = "binomial")
@@ -110,9 +116,9 @@ predict_grf <- function(X, treat, seed){
   na.action <- options()$na.action
   options(na.action='na.pass')
   if (is.data.frame(X)){
-    X.m = model.matrix(~., data=X)
+    X.m = model.matrix(~.-1, data=X)
   } else {
-    X.m = model.matrix(~., data=data.frame(X))
+    X.m = model.matrix(~.-1, data=data.frame(X))
   }
   if (max(as.integer(treat))==2){
     treat=as.integer(treat)-1
@@ -188,7 +194,8 @@ ipw <- function(X, outcome, treat,
     rnam <- paste("R", 1:length.mask, sep="")
     fmla <- as.formula(paste("~ ", paste0(paste(c(xnam1,rnam), collapse= "+"),
                                           "+",
-                                          paste(kronecker(xnam2, rnam,function(x,r) paste0(x,"*",r)), collapse= "+"))))
+                                          paste(kronecker(xnam2, rnam,function(x,r) paste0(x,"*",r)), collapse= "+")),
+                             "-1"))
     na.action.default <- getOption("na.action")
     options(na.action = "na.pass")
     X <- data.frame(model.matrix(fmla, data = X))
@@ -352,7 +359,8 @@ dr <- function(X,
     rnam <- paste("R", 1:length.mask, sep="")
     fmla <- as.formula(paste("~ ", paste0(paste(c(xnam1,rnam), collapse= "+"),
                                           "+",
-                                          paste(kronecker(xnam2, rnam,function(x,r) paste0(x,"*",r)), collapse= "+"))))
+                                          paste(kronecker(xnam2, rnam,function(x,r) paste0(x,"*",r)), collapse= "+")),
+                             "-1"))
     na.action.default <- getOption("na.action")
     options(na.action = "na.pass")
     X1 <- data.frame(model.matrix(fmla, data = X1))
@@ -474,13 +482,13 @@ dr <- function(X,
     options(na.action='na.pass')
     y.hat <- NULL
     if (!is.null(X.for.outcome)) {
-      X.m = model.matrix(~. , data=data.frame(X2))
+      X.m = model.matrix(~.-1, data=data.frame(X2))
       forest.Y = regression_forest(X.m, outcome, tune.parameters = "all")
       y.hat = predict(forest.Y, X.m)$predictions
     }
     w.hat <- NULL
     if (!is.null(X.for.ps)) {
-      X.m = model.matrix(~. , data=data.frame(X1))
+      X.m = model.matrix(~.-1, data=data.frame(X1))
       forest.W = regression_forest(X.m, treat, tune.parameters = "all")
       w.hat = predict(forest.W, X.m)$predictions
     }
@@ -505,7 +513,7 @@ dr <- function(X,
     if (length.mask>0){
       colnames(Xconf) <- c(colnames(X), paste0("R",1:length.mask))
     }
-    X.m <- model.matrix(~. , data=data.frame(Xconf)) # Xconf corresponds to confounders
+    X.m <- model.matrix(~.-1, data=data.frame(Xconf)) # Xconf corresponds to confounders
     tau.forest = causal_forest(X.m, outcome, treat, Y.hat = y.hat, W.hat =w.hat, clusters=clusters)
   
     treatment_effect_dr <- average_treatment_effect(tau.forest, target.sample = target, subset = subset)
@@ -514,7 +522,7 @@ dr <- function(X,
   if (ps.method == "glm.grf" & out.method == "glm.grf") {  
     if (length(unique(outcome))==2 & !outcome.cont){ y = as.factor(outcome) } else { y = outcome }
     if (regularize){
-      x <- model.matrix(~., data = data.frame(X2))
+      x <- model.matrix(~.-1, data = data.frame(X2))
       if (is.factor(y)){
         cv.fit <- glmnet::cv.glmnet(x=x, 
                                     y=y, alpha = 0,
@@ -555,7 +563,7 @@ dr <- function(X,
     }
     
     if (regularize){
-      x <- model.matrix(~., data = data.frame(X1))
+      x <- model.matrix(~.-1, data = data.frame(X1))
       cv.fit <- glmnet::cv.glmnet(x=x, 
                                   y=as.factor(treat), alpha = 0,
                                   family = "binomial")
@@ -593,7 +601,7 @@ dr <- function(X,
     }
     na.action <- options()$na.action
     options(na.action='na.pass')
-    X.m <- model.matrix(~. , data=data.frame(Xconf)) # Xconf corresponds to confounders
+    X.m <- model.matrix(~.-1, data=data.frame(Xconf)) # Xconf corresponds to confounders
     options(na.action=na.action)
     tau.forest = causal_forest(X.m, outcome, treat, Y.hat = y.hat, W.hat =w.hat, clusters=clusters)
     
@@ -611,7 +619,8 @@ dr <- function(X,
         rnam <- paste("R", 1:length.mask, sep="")
         fmla <- as.formula(paste("~ ", paste0(paste(c(xnam1,rnam), collapse= "+"),
                                               "+",
-                                              paste(kronecker(xnam2, rnam,function(x,r) paste0(x,"*",r)), collapse= "+"))))
+                                              paste(kronecker(xnam2, rnam,function(x,r) paste0(x,"*",r)), collapse= "+")),
+                                 "-1"))
         na.action.default <- getOption("na.action")
         options(na.action = "na.pass")
         X2 <- data.frame(model.matrix(fmla, data = X2))
@@ -630,7 +639,7 @@ dr <- function(X,
       if (out.method == "glm"){
         if (length(unique(df.treated[,1]))==2){ y = as.factor(df.treated[,1]) } else { y = df.treated[,1] }
         if (regularize){
-          x <- model.matrix(~., data = data.frame(df.treated[,-1]))
+          x <- model.matrix(~.-1, data = data.frame(df.treated[,-1]))
           if (is.factor(y)){
             cv.fit <- glmnet::cv.glmnet(x=x, 
                                         y=y, alpha = 0,
@@ -668,7 +677,7 @@ dr <- function(X,
       if (out.method == "glm"){
         if (length(unique(df.control[,1]))==2) { y = as.factor(df.control[,1]) } else { y = df.control[,1] }
         if (regularize){
-          x <- model.matrix(~., data = data.frame(df.control[,-1]))
+          x <- model.matrix(~.-1, data = data.frame(df.control[,-1]))
           if (is.factor(y)){
             cv.fit <- glmnet::cv.glmnet(x=x, 
                                         y=y, alpha = 0,
@@ -702,14 +711,14 @@ dr <- function(X,
       colnames(X2) <- paste("X", 1:dim(X2)[2], sep="")
       if (regularize){
         if (length(unique(outcome))==2){
-          x <- model.matrix(~., data = X2[,!one.level.treated[-1]])
+          x <- model.matrix(~.-1, data = X2[,!one.level.treated[-1]])
           y_1.hat <- predict(lm.treated, newx=x, type="response")
-          x <- model.matrix(~., data = X2[,!one.level.control[-1]])
+          x <- model.matrix(~.-1, data = X2[,!one.level.control[-1]])
           y_0.hat <- predict(lm.control, newx=x, type="response")
         } else {
-          x <- model.matrix(~., data = X2[,!one.level.treated[-1]])
+          x <- model.matrix(~.-1, data = X2[,!one.level.treated[-1]])
           y_1.hat <- predict(lm.treated, newx=x)
-          x <- model.matrix(~., data = X2[,!one.level.control[-1]])
+          x <- model.matrix(~.-1, data = X2[,!one.level.control[-1]])
           y_0.hat <- predict(lm.control, newx=x)
         }
       } else {
@@ -743,7 +752,8 @@ dr <- function(X,
           rnam <- paste("R", 1:length.mask, sep="")
           fmla <- as.formula(paste("~ ", paste0(paste(c(xnam1,rnam), collapse= "+"),
                                                 "+",
-                                                paste(kronecker(xnam2, rnam,function(x,r) paste0(x,"*",r)), collapse= "+"))))
+                                                paste(kronecker(xnam2, rnam,function(x,r) paste0(x,"*",r)), collapse= "+")),
+                                   "-1"))
           na.action.default <- getOption("na.action")
           options(na.action = "na.pass")
           X2 <- data.frame(model.matrix(fmla, data = data.frame(X2)))
@@ -793,7 +803,8 @@ dr <- function(X,
           rnam <- paste("R", 1:length.mask, sep="")
           fmla <- as.formula(paste("~ ", paste0(paste(c(xnam1,rnam), collapse= "+"),
                                                 "+",
-                                                paste(kronecker(xnam2, rnam,function(x,r) paste0(x,"*",r)), collapse= "+"))))
+                                                paste(kronecker(xnam2, rnam,function(x,r) paste0(x,"*",r)), collapse= "+")),
+                                   "-1"))
           na.action.default <- getOption("na.action")
           options(na.action = "na.pass")
           X2 <- data.frame(model.matrix(fmla, data = data.frame(X2)))
@@ -841,7 +852,8 @@ dr <- function(X,
           rnam <- paste("R", 1:length.mask, sep="")
           fmla <- as.formula(paste("~ ", paste0(paste(c(xnam1,rnam), collapse= "+"),
                                                 "+",
-                                                paste(kronecker(xnam2, rnam,function(x,r) paste0(x,"*",r)), collapse= "+"))))
+                                                paste(kronecker(xnam2, rnam,function(x,r) paste0(x,"*",r)), collapse= "+")),
+                                   "-1"))
           na.action.default <- getOption("na.action")
           options(na.action = "na.pass")
           X2 <- data.frame(model.matrix(fmla, data = data.frame(X2)))
