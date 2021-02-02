@@ -1,3 +1,8 @@
+library(caret)
+library(grf)
+library(dplyr)
+library(norm)
+
 ###################################################################################
 ## Define propensity scores estimation
 ###################################################################################
@@ -34,12 +39,12 @@ predict_misaem <- function(X, treat, seed=0, pattern = NULL, use.interaction = F
   test.boundary <- T
   k <- 0 
   while (test.boundary & k < 10){
-    list.saem <- miss.saem.v2(as.matrix(X), treat, seed = seed+k, tol_em=1e-06, print_iter=FALSE)
-    
+    p.fit <- miss.glm(treat~., data = data.frame(X, "treat"=treat), seed = seed)
+     
     pr.saem <- NULL
-    try(pr.saem <- pred_saem(as.matrix(X), list.saem$beta, list.saem$mu, list.saem$sig2, method="map"))
+    try(pr.saem <- predict(p.fit, newdata = X, method='map'))
     if (is.null(pr.saem)){
-      pr.saem <- pred_saem(as.matrix(X), list.saem$beta, list.saem$mu, list.saem$sig2, method="impute")
+      pr.saem <- predict(p.fit, newdata = X, method='impute')
     }
     test.boundary <- (min(pr.saem)<1e-6 | max(pr.saem)>1-1e-6)
     k <- k+1
@@ -49,7 +54,7 @@ predict_misaem <- function(X, treat, seed=0, pattern = NULL, use.interaction = F
   colnames(fitted) <- c("pscore")
   
   
-  return(list(fitted=fitted, mu = list.saem$mu, sigma = list.saem$sig2))
+  return(fitted)
 }
 
 # Standard logistic regression on complete X
@@ -194,6 +199,8 @@ ipw <- function(X, outcome, treat,
   if (is.null(fitted)){
     if (ps.method == "glm") {
       fitted <- predict_glm(X, as.factor(treat), seed, regularize=regularize)
+    } else if (ps.method == "saem") {
+      fitted <- predict_misaem(X, as.factor(treat), seed)
     } else if (ps.method == "rf") {
       fitted <- predict_random_forests(X, as.factor(treat), seed)
     } else if (ps.method == "gbm") {
@@ -356,6 +363,8 @@ dr <- function(X,
   if (is.null(fitted)) {
     if (ps.method == "glm") {
       fitted <- predict_glm(X1, as.factor(treat), seed, regularize=regularize)
+    } else if (ps.method == "saem") {
+      fitted <- predict_misaem(X1, as.factor(treat), seed)
     } else if (ps.method == "rf") {
       fitted <- predict_random_forests(X1, as.factor(treat), seed)
     } else if (ps.method == "gbm") {
@@ -522,16 +531,26 @@ dr <- function(X,
       
     } else { 
       if (is.factor(y)){
-        lm.fit <- train(y=y,
-                            x=X2, method="glm",
-                            trControl = trainControl(method="cv",number=5),
-                            family="binomial")
-        y.hat <- predict(lm.fit, X2, type = "prob")[,2]
+        if (sum(is.na(X2))==0){
+          lm.fit <- train(y=y,
+                              x=X2, method="glm",
+                              trControl = trainControl(method="cv",number=5),
+                              family="binomial")
+          y.hat <- predict(lm.fit, X2, type = "prob")[,2]
+        } else {
+          lm.fit <- miss.glm(y ~., data = data.frame(X2, "y"=y), seed=seed)
+          y.hat <- predict(lm.fit, newdata = X2)
+        }
       } else {
-        lm.fit <- train(y=y,
-                        x=X2, method="glm",
-                        trControl = trainControl(method="cv",number=5))
-        y.hat <- predict(lm.fit, X2)
+        if (sum(is.na(X2))==0){
+          lm.fit <- train(y=y,
+                          x=X2, method="glm",
+                          trControl = trainControl(method="cv",number=5))
+          y.hat <- predict(lm.fit, X2)
+        } else {
+          lm.fit <- miss.lm(y ~., data = data.frame(X2, "y"=y))
+          y.hat <- predict(lm.fit, newdata = X2)
+        }
       }
     }
     
@@ -542,11 +561,16 @@ dr <- function(X,
                                   family = "binomial")
       w.hat <- predict(cv.fit, newx=x, s="lambda.min", type="response")
     } else { 
-      lm.fit <- train(y=as.factor(treat),
-                      x=X1, method="glm",
-                      trControl = trainControl(method="cv",number=5),
-                      family="binomial")
-      w.hat <- predict(lm.fit, X1, type="prob")[,2]
+      if (sum(is.na(X1))==0){
+        lm.fit <- train(y=as.factor(treat),
+                        x=X1, method="glm",
+                        trControl = trainControl(method="cv",number=5),
+                        family="binomial")
+        w.hat <- predict(lm.fit, X1, type="prob")[,2]
+      } else {
+        lm.fit <- miss.glm(w ~., data = data.frame(X1, "w"=as.factor(treat)), seed=seed)
+        w.hat <- predict(lm.fit, newdata = X1)
+      }
     }
     
     X <- X.orig
@@ -567,14 +591,17 @@ dr <- function(X,
     if (length.mask>0){
       colnames(Xconf) <- c(colnames(X), paste0("R",1:length.mask))
     }
+    na.action <- options()$na.action
+    options(na.action='na.pass')
     X.m <- model.matrix(~. , data=data.frame(Xconf)) # Xconf corresponds to confounders
+    options(na.action=na.action)
     tau.forest = causal_forest(X.m, outcome, treat, Y.hat = y.hat, W.hat =w.hat, clusters=clusters)
     
     treatment_effect_dr <- average_treatment_effect(tau.forest, target.sample = target, subset = subset)
   }
   
   # Use EM for linear outcome model (either on complete(d) or incomplete X)
-  if (out.method %in% c("glm", "gbm")){ # "gbm" is only available for complete data
+  if (out.method %in% c("saem","glm", "gbm")){ # "gbm" is only available for complete data
 
     # Regular EM for linear regression Y ~ X to predict potential outcomes
     if (sum(is.na(X))==0){
