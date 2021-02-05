@@ -486,11 +486,15 @@ dr <- function(X,
       forest.Y = regression_forest(X.m, outcome, tune.parameters = "all")
       y.hat = predict(forest.Y, X.m)$predictions
     }
-    w.hat <- NULL
-    if (!is.null(X.for.ps)) {
-      X.m = model.matrix(~.-1, data=data.frame(X1))
-      forest.W = regression_forest(X.m, treat, tune.parameters = "all")
-      w.hat = predict(forest.W, X.m)$predictions
+    if (is.null(fitted)){
+      w.hat <- NULL
+      if (!is.null(X.for.ps)) {
+        X.m = model.matrix(~.-1, data=data.frame(X1))
+        forest.W = regression_forest(X.m, treat, tune.parameters = "all")
+        w.hat = predict(forest.W, X.m)$predictions
+      }
+    } else {
+      w.hat <- fitted$pscore
     }
     
     X <- X.orig
@@ -562,24 +566,29 @@ dr <- function(X,
       }
     }
     
-    if (regularize){
-      x <- model.matrix(~.-1, data = data.frame(X1))
-      cv.fit <- glmnet::cv.glmnet(x=x, 
-                                  y=as.factor(treat), alpha = 0,
-                                  family = "binomial")
-      w.hat <- predict(cv.fit, newx=x, s="lambda.min", type="response")
-    } else { 
-      if (sum(is.na(X1))==0){
-        lm.fit <- train(y=as.factor(treat),
-                        x=X1, method="glm",
-                        trControl = trainControl(method="cv",number=5),
-                        family="binomial")
-        w.hat <- predict(lm.fit, X1, type="prob")[,2]
-      } else {
-        lm.fit <- miss.glm(w ~., data = data.frame(X1, "w"=as.factor(treat)), seed=seed)
-        w.hat <- predict(lm.fit, newdata = X1)
+    if (is.null(fitted)){
+      if (regularize){
+        x <- model.matrix(~.-1, data = data.frame(X1))
+        cv.fit <- glmnet::cv.glmnet(x=x, 
+                                    y=as.factor(treat), alpha = 0,
+                                    family = "binomial")
+        w.hat <- predict(cv.fit, newx=x, s="lambda.min", type="response")
+      } else { 
+        if (sum(is.na(X1))==0){
+          lm.fit <- train(y=as.factor(treat),
+                          x=X1, method="glm",
+                          trControl = trainControl(method="cv",number=5),
+                          family="binomial")
+          w.hat <- predict(lm.fit, X1, type="prob")[,2]
+        } else {
+          lm.fit <- miss.glm(w ~., data = data.frame(X1, "w"=as.factor(treat)), seed=seed)
+          w.hat <- predict(lm.fit, newdata = X1)
+        }
       }
+    } else {
+      w.hat <- fitted$pscore
     }
+    
     
     X <- X.orig
     mask <- mask.orig
