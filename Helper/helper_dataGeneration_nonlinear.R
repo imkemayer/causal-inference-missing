@@ -388,11 +388,13 @@ gen_out_deep <- function(x.w.c, sd=0.1, link="nonlinear"){
 
 gen_latentclass <- function(n, p, nb.class=3, mus=NULL, Sigmas=NULL, class.interaction=FALSE,
                             sd=0.1, 
-                            seed=0,
+                            seed=NULL,
                             mechanism=FALSE, prop.missing=0, 
                             cit=FALSE, cio=FALSE,
                             link="nonlinear"){
-  set.seed(seed)
+  if (!is.null(seed)){
+    set.seed(seed)
+  }
   gamma.mar.x <- (20/p)*(runif(n=floor(p/2))-0.5)
 
   if (p == 3){
