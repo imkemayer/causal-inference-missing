@@ -9,7 +9,7 @@ library(norm)
 
 
 # Use SAEM for logistic regression treatment ~ X with missing values in X
-predict_misaem <- function(X, treat, seed=0, pattern = NULL, use.interaction = FALSE){
+predict_misaem <- function(X, treat, seed=NULL, pattern = NULL, use.interaction = FALSE){
   length.covariates <- dim(X)[2]
   col.complete <- which(sapply(X, FUN=function(x) sum(is.na(x))==0))
   length.mask <- 0
@@ -45,7 +45,7 @@ predict_misaem <- function(X, treat, seed=0, pattern = NULL, use.interaction = F
   test.boundary <- T
   k <- 0 
   while (test.boundary & k < 10){
-    p.fit <- miss.glm(treat~., data = data.frame(X.m, "treat"=treat), seed = seed)
+    p.fit <- miss.glm(treat~., data = data.frame(X.m, "treat"=treat))
      
     pr.saem <- NULL
     try(pr.saem <- predict(p.fit, newdata = X.m, method='map'))
@@ -151,7 +151,7 @@ predict_ranger <- function(X, treat, seed){
 ipw <- function(X, outcome, treat, 
                 ps.method="glm", 
                 target= "all", 
-                seed = 0,
+                seed = NULL,
                 trimming_weight = 1,
                 fitted=NULL,
                 mask= NULL,
@@ -170,6 +170,9 @@ ipw <- function(X, outcome, treat,
 
   # @return The average treatment effect estimate and its sample standard deviation
 
+  if (!is.null(seed)){
+    set.seed(seed)
+  }
   ##################
   # Propensity model
   ##################
@@ -289,7 +292,7 @@ dr <- function(X,
                outcome, treat, 
                ps.method="glm", 
                target= "all", 
-               seed = 0,
+               seed = NULL,
                trimming_weight = 1,
                fitted=NULL,
                out.method = "glm",
@@ -321,6 +324,9 @@ dr <- function(X,
   #' 
   #' @return The average treatment effect estimate and an estimate of its standard deviation
   
+  if (!is.null(seed)){
+    set.seed(seed)
+  }
   ##################
   # Propensity model
   ##################

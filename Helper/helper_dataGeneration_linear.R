@@ -65,7 +65,7 @@ latent_confounders <- function(V, n=100, p=10,r=3,sig=0.1){ # sig=0.25
 
 
 gen_linear <- function(n, p=10, r=3, setting="linear1", tau=1,
-                       seed=0, ps.dependence="strong", sd=1, 
+                       seed=NULL, ps.dependence="strong", sd=1, 
                        mechanism=FALSE, prop.missing=0,
                        cit=FALSE, cio=FALSE, 
                        cit2=FALSE, cio2=FALSE,
@@ -98,7 +98,9 @@ gen_linear <- function(n, p=10, r=3, setting="linear1", tau=1,
   if (setting=="linear3") setting <- 3
   if (setting=="linear4") setting <- 4
   
-  set.seed(seed)
+  if (!is.null(seed)){
+    set.seed(seed)
+  }
   # Generate coefficients of logistic regression for generating MAR
   gamma.mar.z <- (10/p)*cbind(0.5*runif(n=floor(p/2))-0.25, 0.25*runif(n=floor(p/2))-0.125)
   gamma.mar.x <- (20/p)*cbind(runif(n=floor(p/2))-0.5,0.5*runif(n=floor(p/2))-0.25)
