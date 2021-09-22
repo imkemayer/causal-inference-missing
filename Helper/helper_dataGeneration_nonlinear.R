@@ -267,7 +267,8 @@ gen_out_lat <- function(x.w.c, class.interaction=FALSE, sd=0.1, link="nonlinear"
       } else if (length(x) == 10){
         y <- as.numeric(2.445 - (w==0)*(sin(0.4*x[1] + 0.154*x[2])+x[3]^2*x[1]*0.5 + 0.5*cos(x[5]^2+1) - 0.152*x[10]) - 
                           (w==1)*((0.25*x[2]^2 - 0.15*x[1] + 0.04*x[10]^2 + 0.12*sqrt(abs(x[5])))>0)) + eps
-      }
+      } 
+        
     }
   } else if (link == "nonlinear3"){
     if (class.interaction){
@@ -482,24 +483,23 @@ gen_latentclass <- function(n, p, nb.class=3, mus=NULL, Sigmas=NULL, class.inter
   
   X.tmp <- X
   
-  
   if (link == "nonlinear3"){
   	for (j in 1:dim(X.tmp)[2]){
 	    # X.tmp[,j] <-(mod(j,5)==1)*(10*((X.tmp[,j]<quantile(X.tmp[,j],0.7)) + (X.tmp[,j]> quantile(X.tmp[,j],0.2)))) +
       #             (mod(j,5)==2)*(5*exp(X.tmp[,j]*x[1])) +
       #             (mod(j,5)==3)*(8*(X.tmp[,j])*(X.tmp[,1]>0)) +
       #             (mod(j,5)==4)*(-2.5*sqrt(abs(X.tmp[,j])))
-      X.tmp[,j] <- (mod(j,5)==1)*((X.tmp[,j]<quantile(X.tmp[,j],0.7)) + (X.tmp[,j]> quantile(X.tmp[,j],0.2))) +
-                   (mod(j,5)==2)*(1/(0.001+exp(X.tmp[,j]*X.tmp[,1]))) +
-                   (mod(j,5)==3)*(-(X.tmp[,j])*(X.tmp[,2]>0)) +
-                   (mod(j,5)==4)*(-2.5*sqrt(abs(X.tmp[,j]))) +
-                   (mod(j,5)==0)*(X.tmp[,j-2]*X.tmp[,j])
+  	  X.tmp[,j] <- (mod(j,5)==1)*((X[,j]<quantile(X[,j],0.7)) + (X[,j]> quantile(X[,j],0.2))) +
+                   (mod(j,5)==2)*(1/(0.001+exp(X[,j]*X[,1]))) +
+                   (mod(j,5)==3)*(-(X[,j])*(X[,2]>0)) +
+                   (mod(j,5)==4)*(-2.5*sqrt(abs(X[,j]))) +
+                   (mod(j,5)==0)*(X[,(j-2)]*X[,j])
 		} 
   }
   if (cio){
     X.tmp[idx_NA] <- 0
   }
-
+  
   if (class.interaction){
     y <- apply(cbind(X.tmp, treat, class), MARGIN=1, FUN=function(x) gen_out_lat(x, class.interaction, sd=sd, link=link))
   } else {
